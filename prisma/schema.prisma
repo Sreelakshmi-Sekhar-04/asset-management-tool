@@ -1,0 +1,1282 @@
+// IT Asset Lifecycle Management — Phase 1 schema.
+// Invariants that must hold regardless of the code path (Asset ID immutability,
+// holder/status invariants, one open transfer per asset, append-only audit log)
+// are additionally enforced by SQL in prisma/migrations/*_constraints.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  ADMIN
+  IT_OPERATOR
+  BRANCH_USER
+}
+
+enum LocationType {
+  REGION
+  STATE
+  BRANCH
+  SITE
+  OTHER
+}
+
+enum AssetStatus {
+  IN_STOCK
+  ASSIGNED
+  UNDER_REPAIR
+  RETIRED
+}
+
+enum HolderType {
+  EMPLOYEE
+  DEPARTMENT
+  LOCATION
+}
+
+enum DisposalType {
+  SCRAPPED
+  SOLD
+  DONATED
+  LOST
+}
+
+enum MovementKind {
+  REGISTERED
+  IMPORTED
+  ASSIGNED
+  CHECKED_IN
+  REPAIR_STARTED
+  REPAIR_COMPLETED
+  RETIRED
+  TRANSFER_RECEIVED
+  TRANSFER_NOT_RECEIVED
+  CORRECTION
+}
+
+enum TransferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  IN_TRANSIT
+  PARTIALLY_RECEIVED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum TransferLineStatus {
+  DRAFT
+  PENDING_APPROVAL
+  IN_TRANSIT
+  RECEIVED
+  NOT_RECEIVED
+  RECALLED
+  CANCELLED
+}
+
+enum ExceptionStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ExceptionResolution {
+  RESENT
+  LOCATED_AT_SENDER
+  WRITTEN_OFF
+}
+
+enum ApprovalAction {
+  ASSET_CREATE
+  ASSIGN
+  CHECK_IN
+  TRANSFER
+  RETIRE
+  STATUS_CHANGE
+}
+
+enum ApproverType {
+  USER
+  ROLE
+  HOLDER_MANAGER
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  FAILED
+}
+
+enum ApprovalTaskStatus {
+  WAITING
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+enum RenewableType {
+  WARRANTY
+  LICENCE
+  SUBSCRIPTION
+  AMC
+  CALIBRATION
+  INSURANCE
+  CERTIFICATE
+  OTHER
+}
+
+enum RenewableStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum CampaignScope {
+  ALL
+  REGIONS
+  BRANCHES
+}
+
+enum CampaignStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum VerificationTaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  SIGNED_OFF
+}
+
+enum VerificationResult {
+  PRESENT
+  MISSING
+  WRONG_DETAILS
+}
+
+enum ReviewStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum DocumentEntity {
+  ASSET
+  TRANSFER
+  TRANSFER_RECEIPT
+  RENEWABLE
+  VERIFICATION_TASK
+  ORGANISATION
+}
+
+enum ScanStatus {
+  NOT_SCANNED
+  CLEAN
+  INFECTED
+  ERROR
+}
+
+enum ImportType {
+  ASSETS
+  EMPLOYEES
+  BRANCH_USERS
+}
+
+enum ImportMode {
+  CREATE_ONLY
+  CREATE_OR_UPDATE
+}
+
+enum ImportStatus {
+  QUEUED
+  VALIDATING
+  VALIDATED
+  COMMIT_QUEUED
+  COMMITTING
+  COMMITTED
+  FAILED
+  CANCELLED
+}
+
+enum RowOutcome {
+  CREATED
+  UPDATED
+  UNCHANGED
+  WARNING
+  REJECTED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum IntegrationKind {
+  DEVICE
+  DIRECTORY
+}
+
+enum FieldRule {
+  OVERWRITE
+  WARN
+  IGNORE
+}
+
+enum RunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+  DUPLICATE
+}
+
+enum ConflictStatus {
+  OPEN
+  ACCEPTED_INCOMING
+  KEPT_CURRENT
+}
+
+enum UnmatchedStatus {
+  OPEN
+  LINKED
+  CREATED
+  DISMISSED
+}
+
+enum EmailStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum TokenPurpose {
+  INVITE
+  RESET
+}
+
+// ─────────────────────── Organisation & configuration ───────────────────────
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+model Location {
+  id        String       @id @default(cuid())
+  name      String
+  type      LocationType @default(BRANCH)
+  state     String?
+  code      String?      @unique
+  email     String?
+  active    Boolean      @default(true)
+  parentId  String?
+  parent    Location?    @relation("LocationTree", fields: [parentId], references: [id])
+  children  Location[]   @relation("LocationTree")
+  /// "/rootId/childId/thisId/" — used for subtree scoping with a prefix match.
+  idPath    String
+  /// Human path, e.g. "South / Kerala / Angamaly". Recomputed for descendants on rename.
+  namePath  String
+  depth     Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  users            User[]
+  employees        Employee[]
+  assets           Asset[]              @relation("AssetLocation")
+  heldAssets       Asset[]              @relation("AssetHolderLocation")
+  transfersFrom    Transfer[]           @relation("TransferFrom")
+  transfersTo      Transfer[]           @relation("TransferTo")
+  verificationTask VerificationTask[]
+
+  @@unique([parentId, name])
+  @@index([idPath])
+  @@map("locations")
+}
+
+model Department {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  employees Employee[]
+  assets    Asset[]    @relation("AssetHolderDepartment")
+
+  @@map("departments")
+}
+
+model AssetCategory {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  serialRequired     Boolean  @default(false)
+  individuallyTracked Boolean @default(true)
+  isSoftware         Boolean  @default(false)
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  assets             Asset[]
+
+  @@map("asset_categories")
+}
+
+// ───────────────────────────── Users & auth ─────────────────────────────
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String
+  role              Role
+  passwordHash      String?
+  locationId        String?
+  location          Location? @relation(fields: [locationId], references: [id])
+  employeeId        String?   @unique
+  employee          Employee? @relation(fields: [employeeId], references: [id])
+  active            Boolean   @default(true)
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  passwordChangedAt DateTime?
+  invitedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions      Session[]
+  tokens        AuthToken[]
+  notifications Notification[]
+  savedFilters  SavedFilter[]
+
+  @@index([role, active])
+  @@index([locationId])
+  @@map("users")
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  tokenHash    String    @unique
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  lastActiveAt DateTime  @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  ip           String?
+  userAgent    String?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuthToken {
+  id        String       @id @default(cuid())
+  tokenHash String       @unique
+  purpose   TokenPurpose
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@map("auth_tokens")
+}
+
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+
+  @@map("rate_limits")
+}
+
+// ───────────────────────────── Employees ─────────────────────────────
+
+model Employee {
+  id           String      @id @default(cuid())
+  employeeCode String      @unique
+  name         String
+  email        String?
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  locationId   String?
+  location     Location?   @relation(fields: [locationId], references: [id])
+  managerId    String?
+  manager      Employee?   @relation("Manager", fields: [managerId], references: [id])
+  reports      Employee[]  @relation("Manager")
+  active       Boolean     @default(true)
+  /// MANUAL | IMPORT | AD
+  source       String      @default("MANUAL")
+  externalId   String?
+  /// Per-field origin, e.g. {"name":"AD","email":"MANUAL"}
+  fieldSources Json        @default("{}")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  user       User?
+  heldAssets Asset[] @relation("AssetHolderEmployee")
+
+  @@index([name])
+  @@index([locationId])
+  @@map("employees")
+}
+
+// ───────────────────────────── Assets ─────────────────────────────
+
+model Asset {
+  id              String         @id @default(cuid())
+  /// AST-000001 — assigned by a database sequence default; immutable (DB trigger).
+  assetCode       String         @unique @default(dbgenerated("('AST-'::text || lpad((nextval('asset_code_seq'::regclass))::text, 6, '0'::text))"))
+  categoryId      String
+  category        AssetCategory  @relation(fields: [categoryId], references: [id])
+  make            String
+  model           String
+  serialNumber    String?
+  /// lower(trim(serial)) — unique; maintained by the service layer and a DB trigger.
+  serialNormalized String?       @unique
+  hostname        String?
+  hostnameNormalized String?
+  ipAddress       String?
+  macAddress      String?
+  legacyTag       String?
+  legacyTagNormalized String?    @unique
+  purchaseDate    DateTime?      @db.Date
+  purchaseCost    Decimal?       @db.Decimal(14, 2)
+  vendor          String?
+  warrantyEnd     DateTime?      @db.Date
+  status          AssetStatus    @default(IN_STOCK)
+  locationId      String?
+  location        Location?      @relation("AssetLocation", fields: [locationId], references: [id])
+  holderType      HolderType?
+  holderEmployeeId   String?
+  holderEmployee     Employee?   @relation("AssetHolderEmployee", fields: [holderEmployeeId], references: [id])
+  holderDepartmentId String?
+  holderDepartment   Department? @relation("AssetHolderDepartment", fields: [holderDepartmentId], references: [id])
+  holderLocationId   String?
+  holderLocation     Location?   @relation("AssetHolderLocation", fields: [holderLocationId], references: [id])
+  /// Status before repair started (to return correctly — FR-STA-02).
+  preRepairStatus AssetStatus?
+  condition       String?
+  remarks         String?
+  sdpTicketId     String?
+  sdpTicketUrl    String?
+  /// Exception flags
+  flagTransferException Boolean  @default(false)
+  flagMissing           Boolean  @default(false)
+  flagDuplicateSuspect  Boolean  @default(false)
+  /// Origin per field: {"hostname":"scalefusion","make":"import"}
+  fieldSources    Json           @default("{}")
+  origin          String         @default("manual")
+  importFingerprint String?      @unique
+  retiredAt       DateTime?
+  retiredById     String?
+  retireReason    String?
+  disposalType    DisposalType?
+  createdAt       DateTime       @default(now())
+  createdById     String?
+  updatedAt       DateTime       @updatedAt
+  updatedById     String?
+
+  movements      AssetMovement[]
+  assignments    AssetAssignment[]
+  transferLines  TransferLine[]
+  renewables     Renewable[]
+  duplicateLinks DuplicateFlag[]   @relation("DupAsset")
+  duplicateOf    DuplicateFlag[]   @relation("DupMatched")
+  deviceData     AssetSourceData[]
+
+  @@index([status])
+  @@index([locationId, status])
+  @@index([categoryId])
+  @@index([hostnameNormalized])
+  @@index([ipAddress])
+  @@index([holderEmployeeId])
+  @@index([warrantyEnd])
+  @@index([createdAt])
+  @@map("assets")
+}
+
+/// Records a warned duplicate accepted with a reason (FR-REG-05) — feeds the duplicates report.
+model DuplicateFlag {
+  id             String    @id @default(cuid())
+  assetId        String
+  asset          Asset     @relation("DupAsset", fields: [assetId], references: [id])
+  matchedAssetId String
+  matchedAsset   Asset     @relation("DupMatched", fields: [matchedAssetId], references: [id])
+  key            String
+  value          String
+  reason         String
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  clearedAt      DateTime?
+  clearedById    String?
+  clearReason    String?
+
+  @@index([assetId])
+  @@index([matchedAssetId])
+  @@map("duplicate_flags")
+}
+
+model AssetAssignment {
+  id                 String      @id @default(cuid())
+  assetId            String
+  asset              Asset       @relation(fields: [assetId], references: [id])
+  holderType         HolderType
+  holderId           String
+  holderName         String
+  startAt            DateTime    @default(now())
+  endAt              DateTime?
+  assignedById       String?
+  endedById          String?
+  /// MANUAL | IMPORT | VERIFICATION | CORRECTION | APPROVAL
+  source             String      @default("MANUAL")
+
+  @@index([assetId, startAt])
+  @@index([holderType, holderId])
+  @@map("asset_assignments")
+}
+
+model AssetMovement {
+  id              String       @id @default(cuid())
+  assetId         String
+  asset           Asset        @relation(fields: [assetId], references: [id])
+  kind            MovementKind
+  fromLocationId  String?
+  fromLocationName String?
+  toLocationId    String?
+  toLocationName  String?
+  fromHolderType  HolderType?
+  fromHolderId    String?
+  fromHolderName  String?
+  toHolderType    HolderType?
+  toHolderId      String?
+  toHolderName    String?
+  fromStatus      AssetStatus?
+  toStatus        AssetStatus?
+  effectiveAt     DateTime
+  recordedAt      DateTime     @default(now())
+  actorId         String?
+  actorName       String?
+  transferId      String?
+  transferLineId  String?
+  approverName    String?
+  receivedByName  String?
+  reason          String?
+  remarks         String?
+  condition       String?
+  isCorrection    Boolean      @default(false)
+
+  @@index([assetId, effectiveAt])
+  @@index([effectiveAt])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@map("asset_movements")
+}
+
+// ───────────────────────────── Transfers ─────────────────────────────
+
+model Transfer {
+  id               String         @id @default(cuid())
+  /// TRF-000001 — sequence default.
+  transferNo       String         @unique @default(dbgenerated("('TRF-'::text || lpad((nextval('transfer_no_seq'::regclass))::text, 6, '0'::text))"))
+  fromLocationId   String
+  fromLocation     Location       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocationId     String
+  toLocation       Location       @relation("TransferTo", fields: [toLocationId], references: [id])
+  reason           String
+  remarks          String?
+  status           TransferStatus @default(DRAFT)
+  interState       Boolean        @default(false)
+  requestedById    String
+  requestedByName  String
+  requestedByRole  Role
+  requestedAt      DateTime       @default(now())
+  submittedAt      DateTime?
+  effectiveDate    DateTime       @db.Date
+  recordedLate     Boolean        @default(false)
+  linkedReference  String?
+  sdpTicketId      String?
+  sdpTicketUrl     String?
+  invoiceNumber    String?
+  autoApproved     Boolean        @default(false)
+  approvalRequestId String?       @unique
+  approvedAt       DateTime?
+  approverNames    String?
+  approvalComment  String?
+  rejectedAt       DateTime?
+  cancelledAt      DateTime?
+  cancelledById    String?
+  completedAt      DateTime?
+  lineCount        Int            @default(0)
+  resendOfExceptionIds String[]   @default([])
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  lines    TransferLine[]
+  receipts TransferReceipt[]
+
+  @@index([status])
+  @@index([fromLocationId, status])
+  @@index([toLocationId, status])
+  @@index([requestedAt])
+  @@map("transfers")
+}
+
+model TransferLine {
+  id              String             @id @default(cuid())
+  transferId      String
+  transfer        Transfer           @relation(fields: [transferId], references: [id])
+  assetId         String
+  asset           Asset              @relation(fields: [assetId], references: [id])
+  status          TransferLineStatus @default(DRAFT)
+  /// Snapshot at dispatch
+  assetCode       String
+  serialNumber    String?
+  make            String?
+  model           String?
+  assetStatusAtDispatch AssetStatus?
+  receiptId       String?
+  receipt         TransferReceipt?   @relation(fields: [receiptId], references: [id])
+  receivedByName  String?
+  rejectReason    String?
+  remark          String?
+  resolvedAt      DateTime?
+  resolvedById    String?
+  exception       TransferException?
+
+  @@unique([transferId, assetId])
+  @@index([assetId, status])
+  @@index([transferId, status])
+  @@map("transfer_lines")
+}
+
+model TransferReceipt {
+  id             String         @id @default(cuid())
+  transferId     String
+  transfer       Transfer       @relation(fields: [transferId], references: [id])
+  actorId        String
+  actorName      String
+  receivedByName String
+  remarks        String?
+  createdAt      DateTime       @default(now())
+  lines          TransferLine[]
+
+  @@index([transferId])
+  @@map("transfer_receipts")
+}
+
+model TransferException {
+  id           String               @id @default(cuid())
+  lineId       String               @unique
+  line         TransferLine         @relation(fields: [lineId], references: [id])
+  transferId   String
+  assetId      String
+  reason       String
+  status       ExceptionStatus      @default(OPEN)
+  resolution   ExceptionResolution?
+  resolutionNote String?
+  resolvedById String?
+  resolvedAt   DateTime?
+  resendTransferId String?
+  createdAt    DateTime             @default(now())
+
+  @@index([status])
+  @@index([assetId])
+  @@map("transfer_exceptions")
+}
+
+// ───────────────────────────── Approval engine ─────────────────────────────
+
+model ApprovalPolicy {
+  id            String           @id @default(cuid())
+  name          String
+  action        ApprovalAction
+  priority      Int              @default(100)
+  active        Boolean          @default(true)
+  /// Conditions — all present conditions must match (AND)
+  categoryIds   String[]         @default([])
+  minCost       Decimal?         @db.Decimal(14, 2)
+  minQuantity   Int?
+  interState    Boolean?
+  initiatorRoles Role[]          @default([])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  steps         ApprovalStep[]
+
+  @@index([action, active, priority])
+  @@map("approval_policies")
+}
+
+model ApprovalStep {
+  id           String         @id @default(cuid())
+  policyId     String
+  policy       ApprovalPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  /// Steps sharing the same order run in parallel; lower orders run first (sequential).
+  stepOrder    Int
+  approverType ApproverType
+  approverUserId String?
+  approverRole Role?
+
+  @@index([policyId, stepOrder])
+  @@map("approval_steps")
+}
+
+model ApprovalRequest {
+  id            String                @id @default(cuid())
+  requestNo     String                @unique @default(dbgenerated("('APR-'::text || lpad((nextval('approval_no_seq'::regclass))::text, 6, '0'::text))"))
+  action        ApprovalAction
+  status        ApprovalRequestStatus @default(PENDING)
+  policyId      String?
+  policyName    String
+  summary       String
+  entityType    String?
+  entityId      String?
+  assetIds      String[]              @default([])
+  /// Location scope ids of affected records (for scoped visibility of the request)
+  locationIds   String[]              @default([])
+  payload       Json
+  initiatorId   String
+  initiatorName String
+  initiatorRole Role
+  currentOrder  Int                   @default(0)
+  decidedAt     DateTime?
+  failureReason String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  tasks         ApprovalTask[]
+
+  @@index([status, action])
+  @@index([initiatorId])
+  @@map("approval_requests")
+}
+
+model ApprovalTask {
+  id            String             @id @default(cuid())
+  requestId     String
+  request       ApprovalRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepOrder     Int
+  approverType  ApproverType
+  approverUserId String?
+  approverRole  Role?
+  status        ApprovalTaskStatus @default(WAITING)
+  decidedById   String?
+  decidedByName String?
+  decidedAt     DateTime?
+  comment       String?
+  reassignedFromUserId String?
+
+  @@index([requestId, stepOrder])
+  @@index([status, approverUserId])
+  @@index([status, approverRole])
+  @@map("approval_tasks")
+}
+
+// ───────────────────────────── Renewals ─────────────────────────────
+
+model Renewable {
+  id              String          @id @default(cuid())
+  assetId         String
+  asset           Asset           @relation(fields: [assetId], references: [id])
+  type            RenewableType
+  label           String
+  vendor          String?
+  identifier      String?
+  seats           Int?
+  startDate       DateTime?       @db.Date
+  expiryDate      DateTime        @db.Date
+  renewalTermMonths Int?
+  cost            Decimal?        @db.Decimal(14, 2)
+  ownerUserId     String?
+  ownerEmployeeId String?
+  critical        Boolean         @default(false)
+  status          RenewableStatus @default(ACTIVE)
+  /// manual | asset-warranty | <integration source key>
+  source          String          @default("manual")
+  sourceKey       String?
+  cycle           Int             @default(1)
+  cycleStartedAt  DateTime        @default(now())
+  acknowledgedAt  DateTime?
+  acknowledgedById String?
+  snoozedUntil    DateTime?       @db.Date
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  reminders       RenewalReminder[]
+  history         RenewalEvent[]
+
+  @@unique([assetId, type, sourceKey])
+  @@index([expiryDate, status])
+  @@map("renewables")
+}
+
+model RenewalEvent {
+  id          String    @id @default(cuid())
+  renewableId String
+  renewable   Renewable @relation(fields: [renewableId], references: [id])
+  action      String
+  oldExpiry   DateTime? @db.Date
+  newExpiry   DateTime? @db.Date
+  cost        Decimal?  @db.Decimal(14, 2)
+  note        String?
+  actorId     String?
+  createdAt   DateTime  @default(now())
+
+  @@index([renewableId])
+  @@map("renewal_events")
+}
+
+model ReminderPolicy {
+  id               String          @id @default(cuid())
+  name             String
+  types            RenewableType[] @default([])
+  leadDays         Int[]           @default([90, 30, 7, 1])
+  notifyOwner      Boolean         @default(true)
+  notifyOwnerManager Boolean       @default(false)
+  roles            Role[]          @default([])
+  userIds          String[]        @default([])
+  channelInApp     Boolean         @default(true)
+  channelEmail     Boolean         @default(true)
+  escalationDays   Int?
+  escalationRole   Role?
+  escalationUserIds String[]       @default([])
+  escalateToOwnerManager Boolean   @default(true)
+  priority         Int             @default(100)
+  active           Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@map("reminder_policies")
+}
+
+/// One row per (renewable, cycle, tier) — the unique key makes "fires once per tier per cycle" a DB guarantee.
+model RenewalReminder {
+  id          String    @id @default(cuid())
+  renewableId String
+  renewable   Renewable @relation(fields: [renewableId], references: [id])
+  cycle       Int
+  /// "90" | "30" | "7" | "1" | "ESCALATION" | "SNOOZE:2026-10-01" | "SKIPPED:90"
+  tier        String
+  sentAt      DateTime  @default(now())
+  recipients  Json      @default("[]")
+
+  @@unique([renewableId, cycle, tier])
+  @@map("renewal_reminders")
+}
+
+// ───────────────────────────── Verification ─────────────────────────────
+
+model VerificationCampaign {
+  id          String                 @id @default(cuid())
+  name        String
+  dueDate     DateTime               @db.Date
+  scope       CampaignScope
+  scopeLocationIds String[]          @default([])
+  recurrenceQuarterly Boolean        @default(false)
+  nextRunAt   DateTime?              @db.Date
+  parentId    String?
+  status      CampaignStatus         @default(ACTIVE)
+  createdById String
+  createdAt   DateTime               @default(now())
+  closedAt    DateTime?
+  tasks       VerificationTask[]
+
+  @@map("verification_campaigns")
+}
+
+model VerificationTask {
+  id           String                 @id @default(cuid())
+  campaignId   String
+  campaign     VerificationCampaign   @relation(fields: [campaignId], references: [id])
+  locationId   String
+  location     Location               @relation(fields: [locationId], references: [id])
+  status       VerificationTaskStatus @default(NOT_STARTED)
+  startedAt    DateTime?
+  submittedAt  DateTime?
+  submittedById String?
+  submittedByName String?
+  signedOffAt  DateTime?
+  signedOffById String?
+  signedOffByName String?
+  signOffNote  String?
+  createdAt    DateTime               @default(now())
+  lines        VerificationLine[]
+  unlisted     VerificationUnlisted[]
+
+  @@unique([campaignId, locationId])
+  @@index([locationId])
+  @@map("verification_tasks")
+}
+
+model VerificationLine {
+  id            String              @id @default(cuid())
+  taskId        String
+  task          VerificationTask    @relation(fields: [taskId], references: [id])
+  assetId       String
+  assetCode     String
+  snapshot      Json
+  /// Asset was in an open transfer at snapshot time — excluded from the checklist.
+  inTransit     Boolean             @default(false)
+  result        VerificationResult?
+  correctedHostname String?
+  correctedIp   String?
+  correctedHolderEmployeeId String?
+  correctedRemarks String?
+  note          String?
+  markedAt      DateTime?
+  markedById    String?
+  reviewStatus  ReviewStatus?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  reviewNote    String?
+
+  @@unique([taskId, assetId])
+  @@index([taskId, result])
+  @@map("verification_lines")
+}
+
+model VerificationUnlisted {
+  id           String           @id @default(cuid())
+  taskId       String
+  task         VerificationTask @relation(fields: [taskId], references: [id])
+  categoryId   String
+  make         String
+  model        String
+  serialNumber String?
+  hostname     String?
+  ipAddress    String?
+  legacyTag    String?
+  remarks      String?
+  addedById    String
+  createdAt    DateTime         @default(now())
+  reviewStatus ReviewStatus     @default(PENDING)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAssetId String?
+
+  @@index([taskId])
+  @@map("verification_unlisted")
+}
+
+// ───────────────────────────── Documents ─────────────────────────────
+
+model Document {
+  id           String         @id @default(cuid())
+  entityType   DocumentEntity
+  entityId     String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  originalSize Int
+  storageKey   String         @unique
+  sha256       String
+  scanStatus   ScanStatus     @default(NOT_SCANNED)
+  description  String?
+  uploadedById String
+  uploadedByName String
+  createdAt    DateTime       @default(now())
+  deletedAt    DateTime?
+  deletedById  String?
+  deleteReason String?
+  purgedAt     DateTime?
+
+  @@index([entityType, entityId])
+  @@map("documents")
+}
+
+// ───────────────────────────── Import / jobs ─────────────────────────────
+
+model ImportJob {
+  id             String       @id @default(cuid())
+  type           ImportType
+  mode           ImportMode   @default(CREATE_ONLY)
+  createMissing  Boolean      @default(false)
+  fileName       String
+  storageKey     String
+  status         ImportStatus @default(QUEUED)
+  totalRows      Int          @default(0)
+  processedRows  Int          @default(0)
+  counts         Json         @default("{}")
+  locationsToCreate Json      @default("[]")
+  departmentsToCreate Json    @default("[]")
+  warningReason  String?
+  error          String?
+  createdById    String
+  createdByName  String
+  createdAt      DateTime     @default(now())
+  validatedAt    DateTime?
+  committedAt    DateTime?
+  committedById  String?
+  rows           ImportRow[]
+
+  @@index([createdAt])
+  @@map("import_jobs")
+}
+
+model ImportRow {
+  id         String      @id @default(cuid())
+  jobId      String
+  job        ImportJob   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rowNumber  Int
+  data       Json
+  outcome    RowOutcome
+  messages   String[]    @default([])
+  /// Matched existing record id (update/unchanged/duplicate)
+  matchedId  String?
+  resultId   String?
+  resultCode String?
+
+  @@unique([jobId, rowNumber])
+  @@index([jobId, outcome])
+  @@map("import_rows")
+}
+
+model Job {
+  id        String    @id @default(cuid())
+  type      String
+  payload   Json      @default("{}")
+  status    JobStatus @default(QUEUED)
+  runAfter  DateTime  @default(now())
+  attempts  Int       @default(0)
+  lastError String?
+  lockedAt  DateTime?
+  createdAt DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([status, runAfter])
+  @@map("jobs")
+}
+
+/// Dedup ledger for scheduled events (aging, verification reminders, recurring campaigns…)
+model ScheduledEvent {
+  key       String   @id
+  createdAt DateTime @default(now())
+
+  @@map("scheduled_events")
+}
+
+// ───────────────────────────── Integrations ─────────────────────────────
+
+model IntegrationSource {
+  id              String          @id @default(cuid())
+  key             String          @unique
+  name            String
+  kind            IntegrationKind @default(DEVICE)
+  active          Boolean         @default(true)
+  apiKeyHash      String?
+  apiKeyPrefix    String?
+  apiKeyRevokedAt DateTime?
+  rateLimitPerMinute Int          @default(60)
+  autoCreate      Boolean         @default(false)
+  autoCreateCategoryId String?
+  autoCreateLocationId String?
+  /// hostname | mac | legacyTag | none
+  secondaryMatchKey String        @default("none")
+  /// Pull / directory connector configuration (secrets stored encrypted in secretEnc)
+  pullEnabled     Boolean         @default(false)
+  pullIntervalMinutes Int?
+  config          Json            @default("{}")
+  secretEnc       String?
+  lastSuccessAt   DateTime?
+  lastRunAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  mappings        IntegrationMapping[]
+  runs            IntegrationRun[]
+  conflicts       IntegrationConflict[]
+  unmatched       IntegrationUnmatched[]
+
+  @@map("integration_sources")
+}
+
+model IntegrationMapping {
+  id          String            @id @default(cuid())
+  sourceId    String
+  source      IntegrationSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  field       String
+  rule        FieldRule         @default(WARN)
+
+  @@unique([sourceId, field])
+  @@map("integration_mappings")
+}
+
+model IntegrationRun {
+  id           String            @id @default(cuid())
+  sourceId     String
+  source       IntegrationSource @relation(fields: [sourceId], references: [id])
+  batchId      String?
+  payloadHash  String?
+  mode         String            @default("PUSH")
+  status       RunStatus         @default(RUNNING)
+  received     Int               @default(0)
+  created      Int               @default(0)
+  updated      Int               @default(0)
+  unchanged    Int               @default(0)
+  conflicts    Int               @default(0)
+  rejected     Int               @default(0)
+  unmatched    Int               @default(0)
+  errors       Json              @default("[]")
+  startedAt    DateTime          @default(now())
+  finishedAt   DateTime?
+  acknowledgedAt DateTime?
+  acknowledgedById String?
+  retryOfRunId String?
+  /// Stored for retry of failed runs
+  payload      Json?
+
+  @@unique([sourceId, batchId])
+  @@index([sourceId, startedAt])
+  @@map("integration_runs")
+}
+
+model IntegrationConflict {
+  id            String            @id @default(cuid())
+  sourceId      String
+  source        IntegrationSource @relation(fields: [sourceId], references: [id])
+  entityType    String            @default("ASSET")
+  entityId      String
+  entityLabel   String
+  field         String
+  currentValue  String?
+  incomingValue String?
+  status        ConflictStatus    @default(OPEN)
+  runId         String?
+  createdAt     DateTime          @default(now())
+  resolvedAt    DateTime?
+  resolvedById  String?
+
+  @@index([status])
+  @@index([entityType, entityId])
+  @@map("integration_conflicts")
+}
+
+model IntegrationUnmatched {
+  id          String            @id @default(cuid())
+  sourceId    String
+  source      IntegrationSource @relation(fields: [sourceId], references: [id])
+  externalId  String?
+  serialNumber String?
+  hostname    String?
+  payload     Json
+  status      UnmatchedStatus   @default(OPEN)
+  runId       String?
+  lastSeenAt  DateTime          @default(now())
+  createdAt   DateTime          @default(now())
+  resolvedAt  DateTime?
+  resolvedById String?
+  assetId     String?
+
+  @@unique([sourceId, externalId])
+  @@index([status])
+  @@map("integration_unmatched")
+}
+
+/// Read-only device data from source systems (OS, last seen, patch status, applications) — display only.
+model AssetSourceData {
+  id           String    @id @default(cuid())
+  assetId      String
+  asset        Asset     @relation(fields: [assetId], references: [id])
+  sourceKey    String
+  externalId   String?
+  os           String?
+  osVersion    String?
+  lastSeen     DateTime?
+  currentUser  String?
+  patchStatus  String?
+  lastPatched  DateTime?
+  applications Json      @default("[]")
+  sourceTimestamp DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([assetId, sourceKey])
+  @@map("asset_source_data")
+}
+
+// ───────────────────────────── Notifications ─────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  link      String?
+  eventKey  String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@unique([userId, eventKey])
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+model EmailOutbox {
+  id        String      @id @default(cuid())
+  to        String
+  subject   String
+  text      String
+  html      String?
+  eventKey  String
+  status    EmailStatus @default(PENDING)
+  attempts  Int         @default(0)
+  lastError String?
+  nextAttemptAt DateTime @default(now())
+  sentAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@unique([to, eventKey])
+  @@index([status, nextAttemptAt])
+  @@map("email_outbox")
+}
+
+model SavedFilter {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  page      String
+  name      String
+  query     Json
+  createdAt DateTime @default(now())
+
+  @@unique([userId, page, name])
+  @@map("saved_filters")
+}
+
+// ───────────────────────────── Audit ─────────────────────────────
+
+/// Append-only. UPDATE / DELETE / TRUNCATE are rejected by database triggers.
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  at          DateTime @default(now())
+  actorId     String?
+  actorEmail  String?
+  actorRole   String?
+  action      String
+  entityType  String
+  entityId    String?
+  entityLabel String?
+  details     Json?
+  before      Json?
+  after       Json?
+  /// Location ids the record belonged to (for scoped audit views)
+  locationIds String[] @default([])
+  ip          String?
+  userAgent   String?
+
+  @@index([entityType, entityId, at])
+  @@index([actorId, at])
+  @@index([action, at])
+  @@index([at])
+  @@map("audit_log")
+}
