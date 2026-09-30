@@ -397,7 +397,7 @@ export async function receive(actor: Actor, transferId: string, input: unknown) 
 
 export async function listExceptions(actor: Actor, p: { status?: string; skip: number; take: number }) {
   const where: Prisma.TransferExceptionWhereInput = {
-    ...(p.status ? { status: p.status as 'OPEN' | 'RESOLVED' } : {}),
+    ...(p.status === 'OPEN' || p.status === 'RESOLVED' ? { status: p.status } : {}),
     ...(actor.role === 'BRANCH_USER' ? { line: { transfer: transferScope(actor) } } : {}),
   };
   const [rows, total] = await Promise.all([

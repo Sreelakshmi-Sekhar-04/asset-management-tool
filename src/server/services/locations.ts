@@ -4,7 +4,7 @@ import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit, diff } from '../audit';
-import { locationScope } from '../scope';
+import { inScopePath, locationScope } from '../scope';
 
 export const locationInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120).refine((s) => !s.includes('/'), 'Name cannot contain "/"'),
@@ -22,7 +22,8 @@ export async function listLocations(actor: Actor, opts: { includeInactive?: bool
   });
   const counts = await prisma.asset.groupBy({ by: ['locationId'], where: { status: { not: 'RETIRED' } }, _count: true });
   const cmap = new Map(counts.map((c) => [c.locationId, c._count]));
-  return rows.map((r) => ({ ...r, assetCount: cmap.get(r.id) ?? 0, effectiveState: effectiveStateFromRows(r, rows) }));
+  // Destination pickers list every location by name, but asset counts are only disclosed within scope.
+  return rows.map((r) => ({ ...r, assetCount: inScopePath(actor, r.idPath) ? cmap.get(r.id) ?? 0 : null, effectiveState: effectiveStateFromRows(r, rows) }));
 }
 
 function effectiveStateFromRows(r: { state: string | null; parentId: string | null }, rows: { id: string; state: string | null; parentId: string | null }[]): string | null {

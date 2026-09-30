@@ -118,7 +118,7 @@ export async function updateSettings(actor: Actor, input: unknown) {
 
 export async function publicSettings() {
   const s = await getSettings();
-  return { orgName: s.orgName, orgLogoDocumentId: s.orgLogoDocumentId, scannerAdvanceKey: s.scannerAdvanceKey, sessionIdleMinutes: s.sessionIdleMinutes } satisfies Partial<Settings>;
+  return { orgName: s.orgName, orgLogoDocumentId: s.orgLogoDocumentId, scannerAdvanceKey: s.scannerAdvanceKey, sessionIdleMinutes: s.sessionIdleMinutes, transferAgingDays: s.transferAgingDays } satisfies Partial<Settings>;
 }
 
 export { DEFAULT_SETTINGS };

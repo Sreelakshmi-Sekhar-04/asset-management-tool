@@ -7,14 +7,14 @@ export interface Loc { id: string; name: string; namePath: string; type: string;
 export interface Cat { id: string; name: string; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean; active: boolean; assetCount: number }
 export interface Dept { id: string; name: string; active: boolean }
 
-export const useLocations = (includeInactive = false) => useApi<Loc[]>(`/api/locations${includeInactive ? '?includeInactive=true' : ''}`);
+export const useLocations = (includeInactive = false, all = false) => useApi<Loc[]>(`/api/locations${includeInactive || all ? '?' : ''}${includeInactive ? 'includeInactive=true&' : ''}${all ? 'all=true' : ''}`);
 export const useCategories = () => useApi<Cat[]>('/api/categories');
 export const useDepartments = () => useApi<Dept[]>('/api/departments');
 
-export function LocationSelect({ value, onChange, placeholder = 'Choose a location', types, className, required, allowEmpty = true, id }: {
-  value: string; onChange: (id: string) => void; placeholder?: string; types?: string[]; className?: string; required?: boolean; allowEmpty?: boolean; id?: string;
+export function LocationSelect({ value, onChange, placeholder = 'Choose a location', types, className, required, allowEmpty = true, id, all }: {
+  value: string; onChange: (id: string) => void; placeholder?: string; types?: string[]; className?: string; required?: boolean; allowEmpty?: boolean; id?: string; all?: boolean;
 }) {
-  const { data } = useLocations();
+  const { data } = useLocations(false, all);
   const rows = (data ?? []).filter((l) => !types || types.includes(l.type));
   return (
     <select id={id} className={clsx('input', className)} value={value} onChange={(e) => onChange(e.target.value)} required={required}>
