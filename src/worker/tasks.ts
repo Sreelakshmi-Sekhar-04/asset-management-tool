@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/db';
 import { todayIST } from '@/lib/format';
-import { runCommit, runValidation } from '@/server/import/engine';
+import { purgeExpiredImportReports, runCommit, runValidation } from '@/server/import/engine';
 import { claimNext, finish } from '@/server/jobs/queue';
 import { runTransferAging } from '@/server/services/aging';
 import { purgeExpiredDocuments } from '@/server/services/documents';
@@ -39,6 +39,7 @@ export const DAILY_TASKS: Record<string, (asOf: string) => Promise<unknown>> = {
   'verification-scheduler': (d) => runVerificationScheduler(d),
   'transfer-aging': (d) => runTransferAging(d),
   'document-purge': () => purgeExpiredDocuments(),
+  'import-report-purge': () => purgeExpiredImportReports(),
   housekeeping: () => housekeeping(),
 };
 

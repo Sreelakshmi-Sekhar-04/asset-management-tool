@@ -74,7 +74,7 @@ describe('renewals', () => {
     const a = await w.asset(w.A.id);
     const r = await createRenewable(w.it.actor, { assetId: a.id, type: 'AMC', label: `AMC ${w.s}`, expiryDate: addDays(todayIST(), 5) });
     await rejectsWith(acknowledge(w.brA.actor, r.id), 403);
-    await acknowledge(w.it.actor, r.id, 'PO raised');
+    await acknowledge(w.it.actor, r.id, 'Renewal in progress');
     await runRenewalReminders(todayIST());
     expect(await prisma.renewalReminder.count({ where: { renewableId: r.id } })).toBe(0);
   });

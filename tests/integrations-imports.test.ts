@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { POST as devicesHook } from '@/app/api/integrations/[source]/devices/route';
 import { issueApiKey, revokeApiKey, saveSource, resolveConflict } from '@/server/services/integrations';
 import { updateAsset } from '@/server/services/assets';
-import { confirmImport, runCommit, runValidation, startImport } from '@/server/import/engine';
+import { confirmImport, importReportCsv, purgeExpiredImportReports, runCommit, runValidation, startImport } from '@/server/import/engine';
 import { world, type World } from './fixtures';
 import { call, rejectsWith } from './helpers';
 
@@ -93,6 +93,21 @@ describe('imports', () => {
     const j = await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(j.status).toBe('FAILED');
     expect(j.error).toMatch(/changed since the dry run/);
+  });
+
+  it('row reports are purged after the retention period, but the import log entry stays', async () => {
+    const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'old.csv', data: csv([`${w.cat.name},HP,EliteBook,OLD-${w.s},${loc()}`]) });
+    await runValidation(job.id);
+    await confirmImport(w.it.actor, job.id);
+    await runCommit(job.id);
+    await expect(importReportCsv(w.it.actor, job.id)).resolves.toBeTruthy();
+    const old = new Date(); old.setUTCMonth(old.getUTCMonth() - 13);
+    await prisma.importJob.update({ where: { id: job.id }, data: { createdAt: old } });
+    await purgeExpiredImportReports();
+    await rejectsWith(importReportCsv(w.it.actor, job.id), 409, /removed/);
+    const j = await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } });
+    expect(j.counts).toMatchObject({ CREATED: 1 });
+    expect(await prisma.importRow.count({ where: { jobId: job.id } })).toBe(0);
   });
 
   it('branch users cannot import', async () => {

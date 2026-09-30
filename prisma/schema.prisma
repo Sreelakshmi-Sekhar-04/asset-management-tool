@@ -1019,6 +1019,8 @@ model ImportJob {
   validatedAt    DateTime?
   committedAt    DateTime?
   committedById  String?
+  /// Set when the uploaded file and row report are purged after the retention period (FR-IMP-12).
+  reportPurgedAt DateTime?
   rows           ImportRow[]
 
   @@index([createdAt])

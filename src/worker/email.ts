@@ -4,7 +4,11 @@ import { prisma } from '@/lib/db';
 let transport: Transporter | null = null;
 let logOnly = false;
 
-/** SMTP when SMTP_URL is set; otherwise messages are logged (development) and marked sent. */
+/**
+ * SMTP when SMTP_URL is set. Without it, development logs recipient and subject only
+ * (never the body) and marks the message sent; production refuses, so the outbox shows
+ * FAILED with the reason instead of pretending mail went out.
+ */
 function getTransport() {
   if (transport) return transport;
   const url = process.env.SMTP_URL;
@@ -21,6 +25,11 @@ const MAX_ATTEMPTS = 5;
 
 /** Send due messages from the outbox with exponential backoff; failures stay visible to Administrators. */
 export async function sendPendingEmails(batch = 50) {
+  if (!process.env.SMTP_URL && process.env.NODE_ENV === 'production') {
+    const n = await prisma.emailOutbox.updateMany({ where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } }, data: { status: 'FAILED', lastError: 'SMTP_URL is not configured on the server' } });
+    if (n.count) console.error(`[mail] SMTP_URL is not configured; ${n.count} message(s) marked failed`);
+    return { sent: 0, failed: n.count };
+  }
   const t = getTransport();
   const due = await prisma.emailOutbox.findMany({ where: { status: 'PENDING', nextAttemptAt: { lte: new Date() } }, orderBy: { createdAt: 'asc' }, take: batch });
   let sent = 0, failed = 0;

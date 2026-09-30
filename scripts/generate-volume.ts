@@ -3,6 +3,7 @@
  * under the response-time targets). DEVELOPMENT / TEST ONLY.
  *
  *   npm run db:generate-volume -- --assets 20000
+ *   npm run db:generate-volume -- --assets 20000 --branch "Hubballi"   (all in one branch, for the 20,000-line transfer test)
  *
  * Adds assets spread across every active branch, ~60% assigned to generated employees,
  * with REGISTERED/ASSIGNED movement history, assignment rows and warranty renewables,
@@ -26,7 +27,9 @@ async function main() {
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEMO_SEED !== 'true') throw new Error('Refusing to generate volume data in production.');
   const total = arg('assets', 20_000);
   const batch = 1000;
-  const branches = await prisma.location.findMany({ where: { active: true, type: 'BRANCH' }, select: { id: true, namePath: true } });
+  const only = (() => { const i = process.argv.indexOf('--branch'); return i > 0 ? process.argv[i + 1] : null; })();
+  const branches = await prisma.location.findMany({ where: { active: true, type: 'BRANCH', ...(only ? { name: { equals: only, mode: 'insensitive' as const } } : {}) }, select: { id: true, namePath: true } });
+  if (only && !branches.length) throw new Error(`No active branch named "${only}".`);
   const cats = await prisma.assetCategory.findMany({ where: { active: true, individuallyTracked: true } });
   const depts = await prisma.department.findMany({ where: { active: true } });
   if (!branches.length || !cats.length) throw new Error('No active branches or categories: run the seed (npm run db:seed) or create master data first.');

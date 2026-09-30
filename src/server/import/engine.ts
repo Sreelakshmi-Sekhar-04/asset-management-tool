@@ -6,7 +6,8 @@ import type { Actor } from '../actor';
 import { audit } from '../audit';
 import { notifyUsers } from '../notify';
 import { actorForUser } from '../services/approvals';
-import { getObject, newKey, putObject } from '../storage';
+import { deleteObject, getObject, newKey, putObject } from '../storage';
+import { getSettings } from '../settings';
 import { enqueue } from '../jobs/queue';
 import { parseTabular } from './parse';
 import { aliasMap, COLUMNS } from './templates';
@@ -158,6 +159,7 @@ export async function importRows(actor: Actor, id: string, p: { outcome?: string
 /** FR-IMP-05: every row with its original row number, outcome and reason, as CSV. */
 export async function importReportCsv(actor: Actor, id: string) {
   const job = await getImport(actor, id);
+  if (job.reportPurgedAt) throw conflict(`The row report for ${job.fileName} was removed on ${job.reportPurgedAt.toISOString().slice(0, 10)} under the import retention setting. The import log entry and its counts remain.`);
   const rows = await prisma.importRow.findMany({ where: { jobId: id }, orderBy: { rowNumber: 'asc' } });
   const cols = COLUMNS[job.type].map((c) => c.key);
   const header = ['Row', 'Outcome', 'Reason', 'Result ID', ...COLUMNS[job.type].map((c) => c.header)];
@@ -165,4 +167,18 @@ export async function importReportCsv(actor: Actor, id: string) {
   const lines = rows.map((r) => [r.rowNumber, outcomeLabel(r.outcome), r.messages.join(' | '), r.resultCode ?? '', ...cols.map((k) => (r.data as Record<string, string>)[k] ?? '')]);
   await audit(prisma, actor, { action: 'EXPORT', entityType: 'Import', entityId: id, entityLabel: `${job.fileName} result report`, details: { rows: rows.length, format: 'csv' } });
   return { data: Buffer.from('﻿' + stringify([header, ...lines])), name: `${job.fileName.replace(/\.[^.]+$/, '')}-result.csv` };
+}
+
+/** FR-IMP-12: row reports stay downloadable for the configured months (12 by default), then the file and rows are purged; the log entry stays. */
+export async function purgeExpiredImportReports(now = new Date()) {
+  const s = await getSettings();
+  const cutoff = new Date(now);
+  cutoff.setUTCMonth(cutoff.getUTCMonth() - s.importReportRetentionMonths);
+  const jobs = await prisma.importJob.findMany({ where: { createdAt: { lt: cutoff }, reportPurgedAt: null, status: { in: ['COMMITTED', 'FAILED', 'CANCELLED'] } }, select: { id: true, storageKey: true } });
+  for (const j of jobs) {
+    await deleteObject(j.storageKey).catch(() => undefined);
+    await prisma.importRow.deleteMany({ where: { jobId: j.id } });
+    await prisma.importJob.update({ where: { id: j.id }, data: { reportPurgedAt: now } });
+  }
+  return { purged: jobs.length };
 }

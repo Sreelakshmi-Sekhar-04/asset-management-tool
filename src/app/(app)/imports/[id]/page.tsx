@@ -7,7 +7,7 @@ import { IMPORT_TYPE, ImportStatus, RUNNING } from '@/components/import-status';
 import { DataTable, useListState } from '@/components/list';
 import { Badge, Card, ErrorBox, Field, PageHeader, Spinner, Stat, useConfirm, useToast } from '@/components/ui';
 
-interface Job { id: string; type: string; mode: string; createMissing: boolean; fileName: string; status: string; totalRows: number; processedRows: number; counts: Record<string, number>; locationsToCreate: string[]; departmentsToCreate: string[]; warningReason: string | null; error: string | null; createdByName: string; createdAt: string; validatedAt: string | null; committedAt: string | null }
+interface Job { id: string; type: string; mode: string; createMissing: boolean; fileName: string; status: string; totalRows: number; processedRows: number; counts: Record<string, number>; locationsToCreate: string[]; departmentsToCreate: string[]; warningReason: string | null; error: string | null; createdByName: string; createdAt: string; validatedAt: string | null; committedAt: string | null; reportPurgedAt: string | null }
 interface Row { id: string; rowNumber: number; data: Record<string, string>; outcome: string; messages: string[]; resultCode: string | null }
 
 const OUT_TONE: Record<string, string> = { CREATED: 'green', UPDATED: 'blue', UNCHANGED: 'gray', WARNING: 'amber', REJECTED: 'red' };
@@ -44,7 +44,7 @@ function Inner() {
       <PageHeader back={{ href: '/imports', label: 'Imports' }} title={job.fileName}
         subtitle={<span className="flex flex-wrap items-center gap-2">{IMPORT_TYPE[job.type]} · {job.mode === 'CREATE_ONLY' ? 'create new only' : 'create or update'} · by {job.createdByName} {fmtDateTime(job.createdAt)} <ImportStatus s={job.status} /></span>}
         actions={<>
-          {!running && job.totalRows > 0 && <button className="btn" onClick={() => download(`/api/imports/${id}/report`).catch((e) => toast(e.message, 'err'))}>Download row report</button>}
+          {!running && job.totalRows > 0 && !job.reportPurgedAt && <button className="btn" onClick={() => download(`/api/imports/${id}/report`).catch((e) => toast(e.message, 'err'))}>Download row report</button>}
           {['QUEUED', 'VALIDATED', 'FAILED'].includes(job.status) && <button className="btn btn-ghost" onClick={async () => { if (await confirm('Cancel this import? Nothing has been saved.')) { await api(`/api/imports/${id}/cancel`, { method: 'POST' }).catch((e) => toast(e.message, 'err')); reload(); } }}>Cancel import</button>}
         </>} />
 

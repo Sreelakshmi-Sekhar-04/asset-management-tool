@@ -1,0 +1,90 @@
+# Production-style stack: PostgreSQL, one-off migrations, web app, worker and nightly backups.
+#   cp .env.example .env    # fill in ENCRYPTION_KEY, SMTP_URL, APP_URL …
+#   export POSTGRES_PASSWORD=…   (or put it in .env)
+#   docker compose up -d --build
+# Development extras:  docker compose --profile dev up -d   (adds Mailpit on http://localhost:8025)
+# Virus scanning:      docker compose --profile clamav up -d  and set VIRUS_SCAN_MODE=clamav, CLAMAV_HOST=clamav
+
+x-app: &app
+  image: itam:latest
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://itam:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/itam?schema=public
+    STORAGE_DIR: /data/storage
+  volumes:
+    - storage:/data/storage
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: itam
+      POSTGRES_USER: itam
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U itam -d itam"]
+      interval: 10s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      db: { condition: service_healthy }
+
+  web:
+    <<: *app
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    <<: *app
+    command: ["npm", "run", "worker"]
+    healthcheck: { disable: true }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Nightly logical backup of the database, keeping the last 14 days. Back up the storage volume too (see docs/DEPLOYMENT.md).
+  backup:
+    image: postgres:16
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          f=/backups/itam-$$(date +%Y%m%d-%H%M).dump
+          pg_dump -h db -U itam -d itam -Fc -f "$$f" && echo "backup written: $$f"
+          find /backups -name 'itam-*.dump' -mtime +14 -delete
+          sleep 86400
+        done
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["dev"]
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["clamav"]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:
+  backups:

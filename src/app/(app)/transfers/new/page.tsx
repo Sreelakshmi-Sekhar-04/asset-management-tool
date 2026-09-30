@@ -112,7 +112,7 @@ export default function NewTransfer() {
                   <input className="input max-w-xs" placeholder="Filter this list" value={filterText} onChange={(e) => setFilterText(e.target.value)} />
                   <button className="btn btn-sm" onClick={() => setPicked((m) => { const n = new Map(m); visible.forEach((a) => n.set(a.id, a)); return n; })}>Add all shown ({visible.length})</button>
                   {browsing && <Spinner />}
-                  {browse && browse.total > browse.rows.length && <span className="text-xs text-slate-500">Showing first {browse.rows.length} of {browse.total}; use paste or the register's select-all for more.</span>}
+                  {browse && browse.total > browse.rows.length && <span className="text-xs text-slate-500">Showing first {browse.rows.length} of {browse.total}; use paste or the register&apos;s select-all for more.</span>}
                 </div>
                 <div className="max-h-72 overflow-auto rounded border">
                   <table className="tbl"><tbody>

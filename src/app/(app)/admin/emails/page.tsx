@@ -14,7 +14,7 @@ function Inner() {
   const { data, error, loading, reload } = useApi<{ rows: E[]; total: number }>(`/api/admin/emails${qs({ status: ls.get('status'), page: ls.page, pageSize: ls.pageSize })}`);
   return (
     <div className="space-y-4">
-      <PageHeader title="Email outbox" subtitle="Every email the system queues. Failed sends retry automatically with back-off; without SMTP configured, emails are logged instead of sent." />
+      <PageHeader title="Email outbox" subtitle="Every email the system queues. Failed sends retry automatically with back-off; without SMTP configured, development logs them and production marks them failed." />
       <FilterSelect label="Status" value={ls.get('status')} onChange={(v) => ls.set('status', v)} options={['PENDING', 'SENT', 'FAILED'].map((v) => ({ value: v, label: v[0] + v.slice(1).toLowerCase() }))} />
       <ErrorBox error={error} />
       <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No emails."
