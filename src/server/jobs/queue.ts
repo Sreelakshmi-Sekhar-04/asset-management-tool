@@ -6,7 +6,7 @@ export async function enqueue(type: string, payload: Prisma.InputJsonValue = {},
   return db.job.create({ data: { type, payload, runAfter } });
 }
 
-export async function claimNext(types?: string[]) {
+export async function claimNext() {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     UPDATE jobs SET status = 'RUNNING', "lockedAt" = now(), attempts = attempts + 1
     WHERE id = (
@@ -19,7 +19,6 @@ export async function claimNext(types?: string[]) {
     RETURNING id`;
   if (!rows.length) return null;
   const job = await prisma.job.findUnique({ where: { id: rows[0].id } });
-  if (job && types && !types.includes(job.type)) return job;
   return job;
 }
 

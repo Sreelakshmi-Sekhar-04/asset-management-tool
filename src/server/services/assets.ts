@@ -11,6 +11,7 @@ import { getSettings } from '../settings';
 import { createApprovalRequest, findPolicy } from './approvals';
 import { assertNotRetired, assertUnlocked, holderColumns, holderOf, recordMovement, switchAssignment, validateHolder, type HolderRef } from './movement';
 import { syncWarrantyRenewable } from './renewables';
+import { onManualAssetEdit } from './integrations';
 
 const optStr = (max = 200) => z.string().trim().max(max).nullable().optional().transform((v) => (v ? v : null));
 const optDate = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').nullable().optional().or(z.literal('').transform(() => null));
@@ -263,6 +264,7 @@ export async function updateAsset(actor: Actor, id: string, input: Record<string
     for (const k of d.changed) fieldSources[k] = 'manual';
     const updated = await t.asset.update({ where: { id: asset.id }, data: { ...Object.fromEntries(d.changed.map((k) => [k, changes[k]])), fieldSources, updatedById: actor.id } });
     if (warns.length) await flagDuplicates(t, actor, asset.id, warns, data.duplicateReason as string);
+    await onManualAssetEdit(t, asset, d.before, d.after);
     await audit(t, actor, {
       action: 'ASSET_UPDATED', entityType: 'Asset', entityId: asset.id, entityLabel: asset.assetCode, before: d.before, after: d.after,
       details: { fields: d.changed, ...(data.serialChangeReason ? { serialChangeReason: data.serialChangeReason } : {}), ...(warns.length ? { duplicateReason: data.duplicateReason } : {}) },
