@@ -256,7 +256,7 @@ async function notifyRunOutcome(source: IntegrationSource, runId: string, status
   if (status !== 'SUCCESS' || counts.unmatched >= UNMATCHED_SURGE) {
     await notifyUsers(prisma, await adminUserIds(prisma), {
       type: 'INTEGRATION_FAILURE', title: status !== 'SUCCESS' ? `${source.name}: run ${status.toLowerCase()}` : `${source.name}: ${counts.unmatched} unmatched devices`,
-      body: summary, link: `/integrations/${source.id}`, eventKey: `integration-run:${runId}:admin`,
+      body: summary, link: `/integrations/sources/${source.id}`, eventKey: `integration-run:${runId}:admin`,
     });
   }
   if (counts.conflicts > 0) {
@@ -692,7 +692,7 @@ export async function runDirectorySync(actor: Actor, sourceId: string, fetcher: 
   } catch (e) {
     const failed = await prisma.integrationRun.update({ where: { id: run.id }, data: { status: 'FAILED', finishedAt: new Date(), errors: [{ record: 0, level: 'error', message: `Directory query failed: ${(e as Error).message}` }] } });
     await prisma.integrationSource.update({ where: { id: s.id }, data: { lastRunAt: new Date() } });
-    await notifyUsers(prisma, await adminUserIds(prisma), { type: 'INTEGRATION_FAILURE', title: `${s.name}: directory sync failed`, body: (e as Error).message, link: `/integrations/${s.id}`, eventKey: `integration-run:${run.id}:admin` });
+    await notifyUsers(prisma, await adminUserIds(prisma), { type: 'INTEGRATION_FAILURE', title: `${s.name}: directory sync failed`, body: (e as Error).message, link: `/integrations/sources/${s.id}`, eventKey: `integration-run:${run.id}:admin` });
     return { runId: failed.id, status: 'FAILED' as const };
   }
   const rules = new Map<string, FieldRule>(s.mappings.map((m) => [m.field, m.rule]));

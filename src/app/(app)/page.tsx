@@ -50,7 +50,7 @@ export default function Dashboard() {
             <ul className="space-y-2 text-sm">
               {d.byLocation.map((l) => (
                 <li key={l.id}>
-                  <div className="flex justify-between gap-2"><Link href={`/assets?locationId=${l.id}`}>{l.name}</Link><span className="text-slate-600">{l.total}</span></div>
+                  <div className="flex justify-between gap-2"><Link href={`/assets?locationId=${l.id}&status=IN_STOCK&status=ASSIGNED&status=UNDER_REPAIR`}>{l.name}</Link><span className="text-slate-600">{l.total}</span></div>
                   <div className="mt-1 flex h-2 overflow-hidden rounded bg-slate-100" title={`Assigned ${l.assigned} · In stock ${l.inStock} · Under repair ${l.underRepair}`}>
                     <div className="bg-green-500" style={{ width: `${(l.assigned / max) * 100}%` }} />
                     <div className="bg-blue-400" style={{ width: `${(l.inStock / max) * 100}%` }} />

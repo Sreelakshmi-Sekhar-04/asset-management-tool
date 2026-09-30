@@ -27,6 +27,7 @@ function Inner() {
         <div className="w-48"><DepartmentSelect value={ls.get('departmentId')} onChange={(v) => ls.set('departmentId', v)} placeholder="All departments" /></div>
         <div className="w-56"><LocationSelect value={ls.get('locationId')} onChange={(v) => ls.set('locationId', v)} placeholder="All locations" /></div>
         <FilterSelect label="Status" value={ls.get('active')} onChange={(v) => ls.set('active', v || 'all')} options={[{ value: 'true', label: 'Active' }, { value: 'false', label: 'Inactive' }, { value: 'all', label: 'All' }]} />
+        <FilterSelect label="Assets" value={ls.get('holding')} onChange={(v) => ls.set('holding', v)} options={[{ value: 'true', label: 'Holding assets' }]} />
       </div>
       <ErrorBox error={error} />
       <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} sort={ls.sort} dir={ls.dir}

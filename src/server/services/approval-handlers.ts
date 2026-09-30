@@ -46,6 +46,10 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
   RETIRE: {
     async execute(t, initiator, req, approvers) {
       const pl = p<BulkPayload & { exceptionIds?: string[] }>(req);
+      if (pl.exceptionIds?.length) {
+        const { forceToStock } = await import('./transfers');
+        await forceToStock(t, initiator, await t.asset.findMany({ where: { id: { in: pl.assetIds } } }), pl.reason ?? 'Written off');
+      }
       await execBulk(t, initiator, { ...pl, op: 'retire' }, undefined, { approvalId: req.id, approverName: approvers });
       if (pl.exceptionIds?.length) {
         const { closeWrittenOffExceptions } = await import('./transfers');

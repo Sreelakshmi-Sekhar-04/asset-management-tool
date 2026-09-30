@@ -23,7 +23,7 @@ const include = {
   _count: { select: { heldAssets: true } },
 } satisfies Prisma.EmployeeInclude;
 
-export async function listEmployees(actor: Actor, p: { search?: string; departmentId?: string; locationId?: string; active?: string; skip: number; take: number; sort?: string; dir?: 'asc' | 'desc' }) {
+export async function listEmployees(actor: Actor, p: { search?: string; departmentId?: string; locationId?: string; active?: string; holding?: string; skip: number; take: number; sort?: string; dir?: 'asc' | 'desc' }) {
   const where: Prisma.EmployeeWhereInput = { AND: [employeeScope(actor)] };
   const and = where.AND as Prisma.EmployeeWhereInput[];
   if (p.search) and.push({ OR: [{ name: { contains: p.search, mode: 'insensitive' } }, { employeeCode: { contains: p.search, mode: 'insensitive' } }, { email: { contains: p.search, mode: 'insensitive' } }] });
@@ -33,6 +33,7 @@ export async function listEmployees(actor: Actor, p: { search?: string; departme
     if (loc) and.push({ location: { idPath: { startsWith: loc.idPath } } });
   }
   if (p.active === 'true' || p.active === 'false') and.push({ active: p.active === 'true' });
+  if (p.holding === 'true') and.push({ heldAssets: { some: { status: { not: 'RETIRED' } } } });
   const sortable = ['name', 'employeeCode', 'email', 'createdAt'];
   const orderBy = [{ [sortable.includes(p.sort ?? '') ? p.sort! : 'name']: p.dir ?? 'asc' }, { id: 'asc' as const }];
   const [rows, total] = await Promise.all([

@@ -183,7 +183,7 @@ async function dispatch(t: Db, actor: Actor, transfer: Transfer & { fromLocation
   const u = await t.transfer.update({ where: { id: transfer.id }, data: { status: 'IN_TRANSIT', approvedAt: new Date(), approverNames, approvalComment: comment, autoApproved: auto } });
   await audit(t, actor, { action: auto ? 'TRANSFER_AUTO_APPROVED' : 'TRANSFER_APPROVED', entityType: 'Transfer', entityId: transfer.id, entityLabel: transfer.transferNo, details: { approvers: approverNames, comment, status: 'IN_TRANSIT' }, locationIds: [transfer.fromLocationId, transfer.toLocationId] });
   const receivers = await branchUserIdsFor(t, transfer.toLocationId);
-  await notifyUsers(t, receivers, { type: 'TRANSFER_IN_TRANSIT', title: `Inbound transfer ${transfer.transferNo} is in transit`, body: `${transfer.lineCount} asset(s) from ${transfer.fromLocation.namePath} are on their way to ${transfer.toLocation.namePath}. Confirm receipt line by line when they arrive.`, link: `/transfers/${transfer.id}/receive`, eventKey: `transfer:${transfer.id}:in-transit` });
+  await notifyUsers(t, receivers, { type: 'TRANSFER_IN_TRANSIT', title: `Inbound transfer ${transfer.transferNo} is in transit`, body: `${transfer.lineCount} asset(s) from ${transfer.fromLocation.namePath} are on their way to ${transfer.toLocation.namePath}. Confirm receipt line by line when they arrive.`, link: `/transfers/${transfer.id}`, eventKey: `transfer:${transfer.id}:in-transit` });
   if (!auto) await notifyUsers(t, [transfer.requestedById], { type: 'TRANSFER_DECIDED', title: `Transfer ${transfer.transferNo} approved`, body: `Approved by ${approverNames}${comment ? `: ${comment}` : ''}. The assets are now in transit.`, link: `/transfers/${transfer.id}`, eventKey: `transfer:${transfer.id}:approved` });
   return u;
 }
@@ -284,7 +284,7 @@ export async function receive(actor: Actor, transferId: string, input: unknown) 
     if (!transfer) throw notFound('Transfer');
     // BR-TRF-2: only lines addressed to the receiver's branch can be processed by that branch.
     if (actor.role === 'BRANCH_USER' && !inScopePath(actor, transfer.toLocation.idPath)) {
-      await audit(t, actor, { action: 'ACCESS_DENIED', entityType: 'Transfer', entityId: transferId, entityLabel: transfer.transferNo, details: { attempted: 'receive' } });
+      await audit(prisma, actor, { action: 'ACCESS_DENIED', entityType: 'Transfer', entityId: transferId, entityLabel: transfer.transferNo, details: { attempted: 'receive' } });
       if (inScopePath(actor, transfer.fromLocation.idPath)) throw forbidden('Only the destination branch can confirm receipt.');
       throw notFound('Transfer');
     }
@@ -447,12 +447,13 @@ export async function resolveExceptions(actor: Actor, input: unknown) {
       const assets = exs.map((e) => e.line.asset);
       const policy = await findPolicy(t, 'RETIRE', await matchContextForAssets(t, assets.map((a) => a.id), actor.role));
       const reason = `Written off: not received on ${[...new Set(exs.map((e) => e.line.transfer.transferNo))].join(', ')}${data.note ? ` — ${data.note}` : ''}`;
-      await forceToStock(t, actor, assets, reason);
+      // Check-in happens only when the write-off actually executes, so a rejected request leaves the assets untouched.
       if (policy) {
         const req = await createApprovalRequest(t, actor, { action: 'RETIRE', policy, summary: `Write off ${assets.length} asset(s) as Lost`, entityType: 'Asset', assetIds: assets.map((a) => a.id), locationIds: [...new Set(assets.map((a) => a.locationId!).filter(Boolean))], payload: { op: 'retire', assetIds: assets.map((a) => a.id), reason, disposalType: 'LOST', exceptionIds: data.exceptionIds } });
         await audit(t, actor, { action: 'TRANSFER_EXCEPTION_WRITE_OFF_REQUESTED', entityType: 'TransferException', entityLabel: req.requestNo, details: { count: exs.length } });
         return { pendingApproval: { id: req.id, requestNo: req.requestNo, policy: policy.name } };
       }
+      await forceToStock(t, actor, assets, reason);
       const { execRetire } = await import('./lifecycle');
       for (const a of await t.asset.findMany({ where: { id: { in: assets.map((x) => x.id) } } })) await execRetire(t, actor, a, { reason, disposalType: 'LOST' });
       await closeWrittenOffExceptions(t, actor, data.exceptionIds, null, data.note);
@@ -464,7 +465,7 @@ export async function resolveExceptions(actor: Actor, input: unknown) {
 }
 
 /** Bring written-off assets to In stock (check-in / end repair) so that retirement preconditions hold. */
-async function forceToStock(t: Db, actor: Actor, assets: Asset[], reason: string) {
+export async function forceToStock(t: Db, actor: Actor, assets: Asset[], reason: string) {
   const { execCheckIn, execRepairDone } = await import('./lifecycle');
   for (const a0 of assets) {
     let a = await t.asset.findUniqueOrThrow({ where: { id: a0.id } });
