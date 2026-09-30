@@ -273,6 +273,9 @@ export async function bulkCheckIn(actor: Actor, assetIds: string[], data: { cond
       try { await preCheckIn(t, a); } catch (e) { problems.push({ ref: a.assetCode, message: (e as Error).message }); }
     }
     if (problems.length) throw badRequest(`${problems.length} asset(s) cannot be checked in. Nothing was applied.`, problems);
+    // Bulk actions go through the same approval policies as single ones.
+    const g = await gate(t, actor, 'CHECK_IN', assets, `Check in ${assets.length} asset(s)`, { op: 'checkin', assetIds: assets.map((a) => a.id), ...data });
+    if (g) return g;
     for (const a of assets) await execCheckIn(t, actor, a, data);
     return { checkedIn: assets.length };
   }, { timeoutMs: 120_000 });
@@ -287,6 +290,8 @@ export async function bulkReassign(actor: Actor, assetIds: string[], toEmployeeI
       try { await preAssign(t, actor, a, holder); } catch (e) { problems.push({ ref: a.assetCode, message: (e as Error).message }); }
     }
     if (problems.length) throw badRequest(`${problems.length} asset(s) cannot be reassigned. Nothing was applied.`, problems);
+    const g = await gate(t, actor, 'ASSIGN', assets, `Reassign ${assets.length} asset(s) to ${await holderName(t, holder.type, holder.id)}`, { op: 'assign', assetIds: assets.map((a) => a.id), holder, remarks });
+    if (g) return g;
     for (const a of assets) await execAssign(t, actor, a, holder, remarks);
     return { reassigned: assets.length };
   }, { timeoutMs: 120_000 });

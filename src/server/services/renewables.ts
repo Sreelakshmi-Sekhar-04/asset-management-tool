@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { patchOf } from '@/lib/zod';
 import type { Asset, Prisma, Renewable, RenewableType, ReminderPolicy, Role } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
@@ -115,7 +116,7 @@ export async function createRenewable(actor: Actor, input: unknown) {
 
 export async function updateRenewable(actor: Actor, id: string, input: unknown) {
   if (actor.role === 'BRANCH_USER') throw forbidden('Branch users can view renewables only.');
-  const data = renewableInput.partial().omit({ assetId: true }).parse(input);
+  const data = patchOf(renewableInput).omit({ assetId: true }).parse(input);
   return tx(async (t) => {
     const r = await scopedRenewable(actor, id, t);
     const u = await t.renewable.update({

@@ -61,7 +61,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
     const tick = () => api<{ unread: number }>('/api/auth/me').then((r) => alive && setUnread(r.unread)).catch(() => undefined);
     tick();
     const t = setInterval(tick, 60_000);
-    return () => { alive = false; clearInterval(t); };
+    window.addEventListener('itam:notifications', tick);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
   }, [pathname]);
   const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname === href || (pathname.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && pathname.startsWith(i.href)))));
   const doLookup = async (e: React.FormEvent) => {

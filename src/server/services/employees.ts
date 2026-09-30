@@ -32,7 +32,7 @@ export async function listEmployees(actor: Actor, p: { search?: string; departme
     const loc = await prisma.location.findUnique({ where: { id: p.locationId } });
     if (loc) and.push({ location: { idPath: { startsWith: loc.idPath } } });
   }
-  if (p.active) and.push({ active: p.active === 'true' });
+  if (p.active === 'true' || p.active === 'false') and.push({ active: p.active === 'true' });
   const sortable = ['name', 'employeeCode', 'email', 'createdAt'];
   const orderBy = [{ [sortable.includes(p.sort ?? '') ? p.sort! : 'name']: p.dir ?? 'asc' }, { id: 'asc' as const }];
   const [rows, total] = await Promise.all([
@@ -97,7 +97,7 @@ export async function updateEmployee(actor: Actor, id: string, input: unknown, o
         throw conflict(`${e.name} holds ${held.length} asset(s): ${held.slice(0, 10).map((h) => h.assetCode).join(', ')}${held.length > 10 ? '…' : ''}. Confirm to deactivate anyway, or check them in / reassign first.`, { code: 'EMPLOYEE_HOLDS_ASSETS', assets: held.map((h) => h.assetCode) });
     }
     const fieldSources = { ...(e.fieldSources as Record<string, string>) };
-    for (const k of Object.keys(data)) fieldSources[k] = 'MANUAL';
+    for (const k of Object.keys(data)) fieldSources[k] = 'manual';
     const u = await t.employee.update({
       where: { id },
       data: { ...data, email: data.email === undefined ? undefined : data.email ?? null, departmentId: data.departmentId === undefined ? undefined : data.departmentId || null, locationId: data.locationId === undefined ? undefined : data.locationId || null, managerId: data.managerId === undefined ? undefined : data.managerId || null, fieldSources },

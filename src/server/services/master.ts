@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { patchOf } from '@/lib/zod';
 import { prisma, tx } from '@/lib/db';
 import { conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
@@ -32,7 +33,7 @@ export async function createCategory(actor: Actor, input: unknown) {
 }
 
 export async function updateCategory(actor: Actor, id: string, input: unknown) {
-  const data = categoryInput.partial().parse(input);
+  const data = patchOf(categoryInput).parse(input);
   return tx(async (t) => {
     const c = await t.assetCategory.findUnique({ where: { id } });
     if (!c) throw notFound('Category');

@@ -25,17 +25,17 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
   },
   ASSIGN: {
     async execute(t, initiator, req, approvers) {
-      const pl = p<{ assetId: string; holder: { type: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION'; id: string }; remarks?: string }>(req);
-      const asset = await t.asset.findUniqueOrThrow({ where: { id: pl.assetId } });
-      await execAssign(t, initiator, asset, pl.holder, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
+      const pl = p<{ assetId?: string; assetIds?: string[]; holder: { type: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION'; id: string }; remarks?: string }>(req);
+      const assets = await t.asset.findMany({ where: { id: { in: pl.assetIds ?? [pl.assetId!] } }, orderBy: { assetCode: 'asc' } });
+      for (const asset of assets) await execAssign(t, initiator, asset, pl.holder, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
       void holderName;
     },
   },
   CHECK_IN: {
     async execute(t, initiator, req, approvers) {
-      const pl = p<{ assetId: string; condition?: string; remarks?: string }>(req);
-      const asset = await t.asset.findUniqueOrThrow({ where: { id: pl.assetId } });
-      await execCheckIn(t, initiator, asset, pl, { approvalId: req.id, approverName: approvers });
+      const pl = p<{ assetId?: string; assetIds?: string[]; condition?: string; remarks?: string }>(req);
+      const assets = await t.asset.findMany({ where: { id: { in: pl.assetIds ?? [pl.assetId!] } }, orderBy: { assetCode: 'asc' } });
+      for (const asset of assets) await execCheckIn(t, initiator, asset, pl, { approvalId: req.id, approverName: approvers });
     },
   },
   STATUS_CHANGE: {

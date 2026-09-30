@@ -124,10 +124,10 @@ export default function AssetDetail() {
       )}
       {tab === 'history' && <History id={a.id} />}
       {tab === 'renewables' && (
-        <Card title="Renewables" actions={me.isIT && <Link className="btn btn-sm" href={`/renewables?new=${a.id}`}>Add renewable</Link>}>
+        <Card title="Renewables" actions={me.isIT && <Link className="btn btn-sm" href={`/renewals?new=${a.id}`}>Add renewable</Link>}>
           {a.renewables.length === 0 ? <p className="text-sm text-slate-500">None.</p> : (
             <table className="tbl"><thead><tr><th>Type</th><th>Item</th><th>Expires</th><th>Status</th><th>Source</th></tr></thead>
-              <tbody>{a.renewables.map((r) => <tr key={r.id}><td>{label(RENEWABLE_TYPE_LABEL, r.type)}</td><td><Link href={`/renewables/${r.id}`}>{r.label}</Link></td><td>{fmtDateOnly(r.expiryDate)} <DaysBadge days={daysBetween(dateOnly(todayIST()), new Date(r.expiryDate))} /></td><td>{r.status}</td><td>{r.source ?? 'manual'}</td></tr>)}</tbody></table>
+              <tbody>{a.renewables.map((r) => <tr key={r.id}><td>{label(RENEWABLE_TYPE_LABEL, r.type)}</td><td><Link href={`/renewals/${r.id}`}>{r.label}</Link></td><td>{fmtDateOnly(r.expiryDate)} <DaysBadge days={daysBetween(dateOnly(todayIST()), new Date(r.expiryDate))} /></td><td>{r.status}</td><td>{r.source ?? 'manual'}</td></tr>)}</tbody></table>
           )}
         </Card>
       )}

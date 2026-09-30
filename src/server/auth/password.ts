@@ -15,7 +15,7 @@ export async function passwordProblems(pw: string, email?: string): Promise<stri
   if (!/[A-Z]/.test(pw)) p.push('an uppercase letter');
   if (!/[0-9]/.test(pw)) p.push('a digit');
   if (!/[^A-Za-z0-9]/.test(pw)) p.push('a symbol');
-  if (email && pw.toLowerCase().includes(email.split('@')[0].toLowerCase())) p.push('must not contain your email name');
+  if (email && pw.toLowerCase().includes(email.split('@')[0].toLowerCase())) p.push('no part of your email address before the @');
   return p;
 }
 

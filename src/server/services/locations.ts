@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { patchOf } from '@/lib/zod';
 import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
@@ -71,11 +72,11 @@ export async function createLocation(actor: Actor, input: z.infer<typeof locatio
   return db ? run(db) : tx(run);
 }
 
-export async function updateLocation(actor: Actor, id: string, input: Partial<z.infer<typeof locationInput>> & { active?: boolean }) {
+export async function updateLocation(actor: Actor, id: string, input: unknown) {
   return tx(async (t) => {
     const loc = await t.location.findUnique({ where: { id } });
     if (!loc) throw notFound('Location');
-    const data = locationInput.partial().extend({ active: z.boolean().optional() }).parse(input);
+    const data = patchOf(locationInput).extend({ active: z.boolean().optional() }).parse(input);
 
     if (data.active === false && loc.active) {
       const count = await t.asset.count({ where: { status: { not: 'RETIRED' }, location: { idPath: { startsWith: loc.idPath } } } });
