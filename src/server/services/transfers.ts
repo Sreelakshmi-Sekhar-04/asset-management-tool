@@ -26,7 +26,7 @@ export const transferInput = z.object({
   sdpTicketUrl: optStr(500).refine((v) => !v || /^https?:\/\//i.test(v), 'Ticket URL must start with http(s)://'),
   invoiceNumber: optStr(80),
   assetIds: z.array(z.string()).max(20_000).optional(),
-  filter: z.record(z.unknown()).optional(),
+  filter: z.record(z.string(), z.unknown()).optional(),
   excludeIds: z.array(z.string()).optional(),
   submit: z.boolean().default(true),
 });

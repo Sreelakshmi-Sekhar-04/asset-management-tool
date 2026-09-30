@@ -98,7 +98,7 @@ export const settingsInput = z.object({
   importReportRetentionMonths: z.number().int().min(12).max(120),
   scannerAdvanceKey: z.enum(['Enter', 'Tab']),
   verificationReminderDays: z.array(z.number().int().min(0).max(90)),
-  notificationEmail: z.record(z.boolean()),
+  notificationEmail: z.record(z.string(), z.boolean()),
 }).partial();
 
 export async function updateSettings(actor: Actor, input: unknown) {

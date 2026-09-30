@@ -193,7 +193,7 @@ export async function execRetire(t: Db, actor: Actor, asset: Asset, data: z.infe
 export const bulkStatusInput = z.object({
   op: z.enum(['REPAIR', 'REPAIR_DONE', 'RETIRE']),
   assetIds: z.array(z.string()).optional(),
-  filter: z.record(z.unknown()).optional(),
+  filter: z.record(z.string(), z.unknown()).optional(),
   excludeIds: z.array(z.string()).optional(),
   reason: z.string().trim().max(1000).optional(),
   disposalType: z.enum(['SCRAPPED', 'SOLD', 'DONATED', 'LOST']).optional(),
