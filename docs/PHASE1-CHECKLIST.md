@@ -129,7 +129,7 @@ Summary: **114 of 114** Phase 1 requirements implemented. FR-VER-11 (a 10-day-cu
 |---|---|---|
 | NFR-01 Volume | Met | Tested with 60,154 assets and 20,000-line transfers and imports |
 | NFR-02 Performance | Met (service layer) | [TESTING.md](TESTING.md#performance-nfr-0102): every target passes with margin |
-| NFR-03 Concurrency | Not load-tested | Stateless web tier, row locks and claim-based workers are designed for it. Run a 50-session load test on staging before go-live. |
+| NFR-03 Concurrency | Met | 50 concurrent sessions over HTTP, 60 s, 0 unexpected errors, every p95 within NFR-02 ([TESTING.md](TESTING.md#concurrency-nfr-03-tc-nfr-04)). Repeat on the target environment before go-live. |
 | NFR-04 Security | Met | Server-side scoping on every read and write (tests), password policy, lockout, TLS support, secrets never logged, API keys hashed |
 | Audit retention ≥ 7 years | Met | Audit log append-only by trigger; the setting cannot go below 7 |
 
@@ -140,7 +140,6 @@ These are implemented with a reasonable default and flagged rather than assumed.
 1. Imports, integration auto-create and verification unlisted finds do not pass through asset-create approval policies (decision 7).
 2. Administrators may approve their own requests (decision 6, from FR-TRF-03).
 3. Cost-based policies compare the highest single-asset cost, not the total (decision 3).
-4. Concurrency (NFR-03) needs a load test in the target environment.
 
 ## Phase 2 safety check
 

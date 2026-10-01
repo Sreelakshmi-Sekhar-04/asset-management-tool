@@ -16,7 +16,8 @@ const GENERIC_LOGIN_ERROR = 'Invalid email or password, or the account is locked
 export async function login(emailRaw: string, password: string, ctx: { ip?: string | null; userAgent?: string | null }) {
   const email = emailRaw.trim().toLowerCase();
   const s = await getSettings();
-  if (!(await hit(`login-ip:${ctx.ip ?? 'unknown'}`, 30, 60))) {
+  // Per-IP throttle when the client IP is known (see TRUST_PROXY_HOPS); per-account lockout applies regardless.
+  if (ctx.ip && !(await hit(`login-ip:${ctx.ip}`, 30, 60))) {
     throw new (await import('@/lib/errors')).AppError(429, 'RATE_LIMITED', 'Too many sign-in attempts. Please wait a minute and try again.');
   }
   const user = await prisma.user.findUnique({ where: { email }, include: { location: true } });
@@ -125,7 +126,8 @@ export async function sendInvite(userId: string, actor: Actor | null) {
 /** Always succeeds from the caller's view so that account existence is not disclosed. */
 export async function requestPasswordReset(emailRaw: string, ctx: { ip?: string | null }) {
   const email = emailRaw.trim().toLowerCase();
-  if (!(await hit(`reset-ip:${ctx.ip ?? 'unknown'}`, 10, 300))) return;
+  if (ctx.ip && !(await hit(`reset-ip:${ctx.ip}`, 10, 300))) return;
+  if (!(await hit(`reset-email:${email}`, 3, 900))) return;
   const user = await prisma.user.findUnique({ where: { email } });
   await audit(prisma, null, { action: 'PASSWORD_RESET_REQUESTED', entityType: 'User', entityId: user?.id, entityLabel: email, details: { known: !!user } });
   if (!user || !user.active) return;

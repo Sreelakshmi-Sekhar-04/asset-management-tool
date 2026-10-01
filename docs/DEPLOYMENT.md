@@ -48,7 +48,7 @@ npm run worker       # worker, as a second service
 Terminate TLS at a reverse proxy (nginx, Caddy, a cloud load balancer) and forward to port 3000. Then:
 
 - set `FORCE_HTTPS=true` (HSTS header and `Secure` session cookie) and an `https://` `APP_URL`
-- pass `X-Forwarded-For` so sign-in rate limiting and the audit log see real client IPs
+- pass `X-Forwarded-For` and set `TRUST_PROXY_HOPS=1` (one proxy) so sign-in rate limiting and the audit log see real client IPs. Leave it at 0 when nothing trusted sits in front, because clients can forge the header.
 - allow request bodies up to 25 MB for imports (for example `client_max_body_size 25m;`)
 
 ## Upgrades

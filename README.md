@@ -55,6 +55,7 @@ Full instructions: [docs/SETUP.md](docs/SETUP.md).
 | `npm run db:generate-volume -- --assets 20000` | Volume data for performance testing, development only |
 | `npm test` | Automated tests against a disposable `*_test` database |
 | `npm run perf:check` | Times the NFR-02 targets against a volume database |
+| `npm run load:test -- --sessions 50` | Concurrent-session load test over HTTP (development or staging only) |
 | `npm run typecheck` / `npm run lint` | Static checks |
 
 ## Stack

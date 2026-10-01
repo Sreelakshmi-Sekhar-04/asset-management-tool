@@ -72,3 +72,21 @@ describe('authentication', () => {
     await rejectsWith(changePassword(w.admin.actor, 'not-it', 'Whatever#2026x'), 403);
   });
 });
+
+describe('client IP for rate limiting', () => {
+  const h = (xff: string) => new Headers({ 'x-forwarded-for': xff });
+  it('ignores forwarding headers unless a trusted proxy is configured, then uses the entry it appended', async () => {
+    const { ipFromHeaders } = await import('@/server/http');
+    const prev = process.env.TRUST_PROXY_HOPS;
+    try {
+      delete process.env.TRUST_PROXY_HOPS;
+      expect(ipFromHeaders(h('1.2.3.4'))).toBeNull();
+      process.env.TRUST_PROXY_HOPS = '1';
+      // A client-forged leftmost entry is ignored; the proxy-appended rightmost entry is used.
+      expect(ipFromHeaders(h('6.6.6.6, 203.0.113.9'))).toBe('203.0.113.9');
+      expect(ipFromHeaders(new Headers())).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.TRUST_PROXY_HOPS; else process.env.TRUST_PROXY_HOPS = prev;
+    }
+  });
+});

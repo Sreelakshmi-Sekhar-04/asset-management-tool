@@ -17,7 +17,8 @@
     "db:generate-volume": "tsx scripts/generate-volume.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "perf:check": "tsx scripts/perf-check.ts"
+    "perf:check": "tsx scripts/perf-check.ts",
+    "load:test": "tsx scripts/load-test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

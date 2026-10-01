@@ -8,10 +8,20 @@ import { actorFromToken, SESSION_COOKIE } from './auth/session';
 import { audit } from './audit';
 import { prisma } from '@/lib/db';
 
-export function clientIp(req: Request): string | null {
-  const xf = req.headers.get('x-forwarded-for');
-  return (xf ? xf.split(',')[0].trim() : req.headers.get('x-real-ip')) ?? null;
+/**
+ * The client's IP, for rate limiting and the audit log. Forwarding headers are only
+ * trusted behind a proxy you run: TRUST_PROXY_HOPS=1 for one reverse proxy (the entry
+ * that proxy appended is used, never the client-supplied leftmost one). With the
+ * default 0 the headers are ignored, because any client can forge them.
+ */
+export function ipFromHeaders(h: Headers): string | null {
+  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  if (!(hops > 0)) return null;
+  const chain = (h.get('x-forwarded-for') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return chain.length >= hops ? chain[chain.length - hops] : null;
 }
+
+export const clientIp = (req: Request) => ipFromHeaders(req.headers);
 
 export async function actorFromRequest(req: NextRequest | Request): Promise<Actor | null> {
   const cookieHeader = req.headers.get('cookie') ?? '';
@@ -23,7 +33,7 @@ export async function actorFromRequest(req: NextRequest | Request): Promise<Acto
 export async function currentActor(): Promise<Actor | null> {
   const c = await cookies();
   const h = await headers();
-  return actorFromToken(c.get(SESSION_COOKIE)?.value, { ip: h.get('x-forwarded-for'), userAgent: h.get('user-agent') });
+  return actorFromToken(c.get(SESSION_COOKIE)?.value, { ip: ipFromHeaders(h), userAgent: h.get('user-agent') });
 }
 
 type Ctx<P> = { req: NextRequest; actor: Actor; params: P; url: URL };
