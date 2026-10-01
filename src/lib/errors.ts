@@ -1,0 +1,47 @@
+import { Prisma } from '@prisma/client';
+
+export type ErrorDetail = { field?: string; line?: string | number; message: string; ref?: string };
+
+export class AppError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+    public details?: ErrorDetail[] | Record<string, unknown>,
+  ) {
+    super(message);
+  }
+}
+export const badRequest = (msg: string, details?: AppError['details']) => new AppError(400, 'VALIDATION_ERROR', msg, details);
+export const unauthorized = (msg = 'Please sign in.') => new AppError(401, 'UNAUTHENTICATED', msg);
+export const forbidden = (msg = 'You do not have permission to perform this action.') => new AppError(403, 'FORBIDDEN', msg);
+/** Used for out-of-scope records too, so that nothing about the record is disclosed. */
+export const notFound = (what = 'Record') => new AppError(404, 'NOT_FOUND', `${what} not found or not accessible.`);
+export const conflict = (msg: string, details?: AppError['details']) => new AppError(409, 'CONFLICT', msg, details);
+
+/** Translate database-level failures into specific, user-readable errors. */
+export function toAppError(e: unknown): AppError {
+  if (e instanceof AppError) return e;
+  if (e instanceof Prisma.PrismaClientKnownRequestError) {
+    if (e.code === 'P2002') {
+      const target = String((e.meta?.target as string[] | string | undefined) ?? '');
+      if (target.includes('serialNormalized')) return conflict('An asset with this serial number already exists.');
+      if (target.includes('legacyTag')) return conflict('An asset with this legacy tag already exists.');
+      if (target.includes('assetId')) return conflict('One or more assets are already part of an open transfer.');
+      if (target.includes('email')) return conflict('This email address is already in use.');
+      if (target.includes('employeeCode')) return conflict('An employee with this employee ID already exists.');
+      if (target.includes('name')) return conflict('A record with this name already exists.');
+      return conflict(`Duplicate value (${target}).`);
+    }
+    if (e.code === 'P2025') return notFound();
+    if (e.code === 'P2003') return badRequest('A referenced record does not exist.');
+    if (e.code === 'P2034') return conflict('Another user changed this record at the same moment. Please retry.');
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  const m = msg.match(/(ASSET_ID_IMMUTABLE|ASSET_RETIRED|TRANSFER_NO_IMMUTABLE|AUDIT_APPEND_ONLY|DELETE_FORBIDDEN)[^\n"]*/);
+  if (m) return new AppError(m[1] === 'AUDIT_APPEND_ONLY' || m[1] === 'DELETE_FORBIDDEN' ? 403 : 400, m[1], m[0].replace(/^[A-Z_]+: /, ''));
+  if (/inv1_assigned_has_holder|inv2_holder|inv3_retired|holder_reference/.test(msg))
+    return badRequest('The change violates an asset invariant: an Assigned asset needs a holder, and only Assigned or Under-repair assets may have one.');
+  if (/transfer_lines_one_open_per_asset/.test(msg)) return conflict('One or more assets are already part of an open transfer.');
+  return new AppError(500, 'INTERNAL', 'An unexpected error occurred. The error has been logged.');
+}
