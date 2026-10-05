@@ -268,6 +268,15 @@ enum TokenPurpose {
 
 // ─────────────────────── Organisation & configuration ───────────────────────
 
+/// One running number per Asset ID prefix (Asset ID format with separate numbering).
+model AssetCodeCounter {
+  prefix    String   @id
+  nextValue BigInt
+  updatedAt DateTime @default(now())
+
+  @@map("asset_code_counters")
+}
+
 model Setting {
   key       String   @id
   value     Json
@@ -322,6 +331,7 @@ model Department {
 model AssetCategory {
   id                 String   @id @default(cuid())
   name               String   @unique
+  code               String?  @unique // optional short code used in Asset IDs, e.g. LAP
   serialRequired     Boolean  @default(false)
   individuallyTracked Boolean @default(true)
   isSoftware         Boolean  @default(false)
@@ -437,7 +447,7 @@ model Employee {
 model Asset {
   id              String         @id @default(cuid())
   /// AST-000001 — assigned by a database sequence default; immutable (DB trigger).
-  assetCode       String         @unique @default(dbgenerated("('AST-'::text || lpad((nextval('asset_code_seq'::regclass))::text, 6, '0'::text))"))
+  assetCode       String         @unique @default("") // assigned by the assets_assign_code trigger from the Asset ID format
   categoryId      String
   category        AssetCategory  @relation(fields: [categoryId], references: [id])
   make            String

@@ -30,8 +30,8 @@ Summary: **114 of 114** Phase 1 requirements implemented. FR-VER-11 (a 10-day-cu
 | FR-REG-07 | Search and filter: | A | Done | src/server/services/assets.ts |
 | FR-REG-08 | Bulk-add by model × quantity: | R1 | Done | src/server/services/assets.ts |
 | FR-REG-09 | Scanner-friendly entry: | R1 | Done | src/components/scanner.ts |
-| FR-REG-10 | Label generation: | R1 | Done | src/server/pdf.ts |
-| FR-REG-11 | Asset lookup by scanning or typing the Asset ID from any screen, through a global search box. | A | Done | src/server/services/assets.ts |
+| FR-REG-10 | Label generation: | R1 | Done | src/server/pdf.ts, src/components/labels.tsx |
+| FR-REG-11 | Asset lookup by scanning or typing the Asset ID from any screen, through a global search box. | A | Done | src/server/services/assets.ts, src/app/(app)/scan |
 | FR-IMP-01 | Download import templates for assets and employees, in CSV and Excel, with column help. | A | Done | src/server/import/templates.ts; `/api/imports/template` |
 | FR-IMP-02 | Upload a CSV or Excel file of up to 20,000 rows. | A | Done | src/server/import/engine.ts + worker job queue; imports/[id] progress page |
 | FR-IMP-03 | Dry-run first: | A | Done | src/server/import/engine.ts |

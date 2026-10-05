@@ -1,13 +1,14 @@
 'use client';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { Fragment, useState } from 'react';
 import { daysBetween, fmtDateOnly, fmtDateTime, fmtINR, todayIST, dateOnly } from '@/lib/format';
 import { HOLDER_TYPE_LABEL, label, RENEWABLE_TYPE_LABEL, STATUS_LABEL } from '@/lib/labels';
-import { api, download, useApi } from '@/components/api';
+import { api, useApi } from '@/components/api';
 import { AssetFields, DuplicateNotice, toPayload, type AssetFormValues } from '@/components/asset-form';
 import { AssetStatus, DaysBadge, Flags } from '@/components/badges';
 import { DocumentsPanel } from '@/components/documents';
+import { AssetQrCard, PrintLabelsDialog } from '@/components/labels';
 import { useMe } from '@/components/me';
 import { HolderPicker, LocationSelect, type HolderValue } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, Modal, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
@@ -26,7 +27,7 @@ interface Detail {
 }
 interface TL { at: string; effectiveAt?: string | null; kind: string; title: string; actor: string | null; details: string[]; ref?: { type: string; id: string; label: string } }
 
-type Dialog = '' | 'edit' | 'assign' | 'checkin' | 'repair' | 'repairdone' | 'retire' | 'correct' | 'clear';
+type Dialog = '' | 'label' | 'edit' | 'assign' | 'checkin' | 'repair' | 'repairdone' | 'retire' | 'correct' | 'clear';
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +36,9 @@ export default function AssetDetail() {
   const { data: a, error, reload } = useApi<Detail>(`/api/assets/${id}`);
   const [tab, setTab] = useState('overview');
   const [dlg, setDlg] = useState<Dialog>('');
+  const sp = useSearchParams();
+  const justRegistered = sp.get('registered') === '1';
+  const scanned = sp.get('scanned') === '1';
   if (error) return <ErrorBox error={error} />;
   if (!a) return <div className="flex justify-center py-20"><Spinner /></div>;
   const retired = a.status === 'RETIRED';
@@ -57,11 +61,13 @@ export default function AssetDetail() {
           {me.isIT && !locked && a.status === 'UNDER_REPAIR' && <button className="btn" onClick={() => setDlg('repairdone')}>Repair done</button>}
           {me.isIT && !locked && a.status === 'IN_STOCK' && <button className="btn" onClick={() => setDlg('retire')}>Retire</button>}
           {!retired && !locked && <Link className="btn" href={`/transfers/new?assetId=${a.id}&from=${a.locationId}`}>Transfer</Link>}
-          <button className="btn" onClick={() => download('/api/assets/labels', { assetIds: [a.id] }).catch((e) => toast(e.message, 'err'))}>Label</button>
+          <button className="btn" onClick={() => setDlg('label')}>Print label</button>
           {me.isAdmin && !retired && !locked && <button className="btn" onClick={() => setDlg('correct')}>Correct location / holder</button>}
           {me.isIT && a.flags.length > 0 && <button className="btn" onClick={() => setDlg('clear')}>Clear flag</button>}
         </>} />
 
+      {justRegistered && <div className="flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm">Registered as <b className="font-mono">{a.assetCode}</b>. Print its label and attach it to the device.<button className="btn btn-sm btn-primary" onClick={() => setDlg('label')}>Print label</button></div>}
+      {scanned && <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">Opened from a scan.<Link className="btn btn-sm" href="/scan">Scan next</Link></div>}
       {a.openTransfer && <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">In open transfer <Link href={`/transfers/${a.openTransfer.id}`}>{a.openTransfer.transferNo}</Link> to {a.openTransfer.toLocation}. Location, holder and status are locked until it is received or recalled.</div>}
       {a.pendingApprovals.map((p) => <div key={p.id} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">Pending approval <Link href={`/approvals/${p.id}`}>{p.requestNo}</Link>: {p.summary}. The asset is locked until it is decided.</div>)}
       {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Transfer exception: {x.reason} · <Link href={`/transfers/${x.transferId}`}>open transfer</Link> · <Link href="/transfers/exceptions">resolve</Link></div>)}
@@ -90,6 +96,9 @@ export default function AssetDetail() {
                 </Fragment>
               ))}
             </dl>
+          </Card>
+          <Card title="QR code and label">
+            <AssetQrCard id={a.id} assetCode={a.assetCode} onPrint={() => setDlg('label')} />
           </Card>
           <Card title="Purchase and warranty">
             <dl className="kv">
@@ -152,6 +161,7 @@ export default function AssetDetail() {
         </div>
       )}
 
+      <PrintLabelsDialog open={dlg === 'label'} onClose={() => setDlg('')} assetIds={[a.id]} title={`Print label for ${a.assetCode}`} />
       <EditDialog open={dlg === 'edit'} onClose={() => setDlg('')} a={a} branchOnly={me.isBranch} onDone={done('Saved')} />
       <AssignDialog open={dlg === 'assign'} onClose={() => setDlg('')} a={a} onDone={done('Assigned')} />
       <SimpleDialog open={dlg === 'checkin'} onClose={() => setDlg('')} title={`Check in ${a.assetCode}`} submitLabel="Check in" fields={[{ k: 'condition', label: 'Condition' }, { k: 'remarks', label: 'Remarks', area: true }]} path={`/api/assets/${a.id}/check-in`} onDone={done('Checked in')} note={`Returns the asset from ${a.holder} to stock at ${a.location}.`} />

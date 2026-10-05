@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Prisma, VerificationTaskStatus } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
+import { extractAssetCode } from '@/lib/asset-code';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import { dateOnly, daysBetween, fmtDateOnly, todayIST } from '@/lib/format';
 import type { Actor } from '../actor';
@@ -193,7 +194,7 @@ export async function markAllPresent(actor: Actor, taskId: string) {
 export async function scanLine(actor: Actor, taskId: string, code: string) {
   const task = await scopedTask(actor, taskId);
   assertEditable(actor, task.status);
-  const c = code.trim().toUpperCase();
+  const c = extractAssetCode(code).toUpperCase();
   const line = await prisma.verificationLine.findFirst({ where: { taskId, OR: [{ assetCode: c }, { asset: { serialNormalized: c.toLowerCase() } }, { asset: { legacyTagNormalized: c.toLowerCase() } }] } });
   if (!line) throw notFound(`"${code}" is not on this checklist. If the asset is physically here, add it as an unlisted asset. Asset`);
   if (line.inTransit) throw conflict(`${line.assetCode} is in an open transfer and is excluded from this checklist.`);

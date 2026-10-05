@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import { fmtDateOnly, fmtDateTime } from '@/lib/format';
 import { api, ApiError, download, qs, useApi } from '@/components/api';
 import { DuplicateNotice } from '@/components/asset-form';
+import { CameraScanner } from '@/components/camera-scanner';
 import { DocumentsPanel } from '@/components/documents';
 import { TaskStatus } from '@/components/badges';
 import { DataTable, FilterSelect, SearchBox, useListState } from '@/components/list';
@@ -189,24 +190,29 @@ function ScanBox({ taskId, onDone }: { taskId: string; onDone: () => void }) {
   const [code, setCode] = useState('');
   const [last, setLast] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [camera, setCamera] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   const onKey = useScannerAdvance();
-  const submit = async () => {
-    const c = code.trim();
+  const mark = async (raw: string) => {
+    const c = raw.trim();
     if (!c) return;
     setBusy(true);
     try {
       const r = await api<{ assetCode: string }>(`/api/verification/tasks/${taskId}/scan`, { body: { code: c } });
       setLast({ ok: true, text: `${r.assetCode} marked present` }); onDone();
     } catch (e) { setLast({ ok: false, text: (e as Error).message }); }
-    finally { setBusy(false); setCode(''); ref.current?.focus(); }
+    finally { setBusy(false); setCode(''); if (!camera) ref.current?.focus(); }
   };
   return (
-    <div className="card card-body flex flex-wrap items-center gap-3">
-      <label className="text-sm font-medium" htmlFor="scan">Scan or type</label>
-      <input id="scan" ref={ref} data-scan className="input max-w-xs" placeholder="Asset ID, serial or legacy tag" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => onKey(e, submit)} autoFocus disabled={busy} />
-      <button className="btn" onClick={submit} disabled={busy || !code.trim()}>Mark present</button>
-      {last && <span className={`text-sm ${last.ok ? 'text-green-700' : 'text-red-600'}`}>{last.text}</span>}
+    <div className="card card-body space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-sm font-medium" htmlFor="scan">Scan or type</label>
+        <input id="scan" ref={ref} data-scan className="input max-w-xs" placeholder="Asset ID, serial or legacy tag" value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={(e) => onKey(e, () => mark(code))} autoFocus disabled={busy} />
+        <button className="btn" onClick={() => mark(code)} disabled={busy || !code.trim()}>Mark present</button>
+        <button className="btn" onClick={() => setCamera((c) => !c)}>{camera ? 'Close camera' : 'Scan with camera'}</button>
+        {last && <span className={`text-sm ${last.ok ? 'text-green-700' : 'text-red-600'}`}>{last.text}</span>}
+      </div>
+      {camera && <CameraScanner className="max-w-sm" onScan={mark} paused={busy} />}
     </div>
   );
 }

@@ -25,6 +25,7 @@ export function toAppError(e: unknown): AppError {
   if (e instanceof Prisma.PrismaClientKnownRequestError) {
     if (e.code === 'P2002') {
       const target = String((e.meta?.target as string[] | string | undefined) ?? '');
+      if (target.includes('assetCode')) return conflict('That Asset ID is already taken. Save again to get the next free Asset ID.');
       if (target.includes('serialNormalized')) return conflict('An asset with this serial number already exists.');
       if (target.includes('legacyTag')) return conflict('An asset with this legacy tag already exists.');
       if (target.includes('assetId')) return conflict('One or more assets are already part of an open transfer.');
@@ -38,7 +39,7 @@ export function toAppError(e: unknown): AppError {
     if (e.code === 'P2034') return conflict('Another user changed this record at the same moment. Please retry.');
   }
   const msg = e instanceof Error ? e.message : String(e);
-  const m = msg.match(/(ASSET_ID_IMMUTABLE|ASSET_RETIRED|TRANSFER_NO_IMMUTABLE|AUDIT_APPEND_ONLY|DELETE_FORBIDDEN)[^\n"]*/);
+  const m = msg.match(/(ASSET_ID_IMMUTABLE|ASSET_ID_EXHAUSTED|ASSET_RETIRED|TRANSFER_NO_IMMUTABLE|AUDIT_APPEND_ONLY|DELETE_FORBIDDEN)[^\n"]*/);
   if (m) return new AppError(m[1] === 'AUDIT_APPEND_ONLY' || m[1] === 'DELETE_FORBIDDEN' ? 403 : 400, m[1], m[0].replace(/^[A-Z_]+: /, ''));
   if (/inv1_assigned_has_holder|inv2_holder|inv3_retired|holder_reference/.test(msg))
     return badRequest('The change violates an asset invariant: an Assigned asset needs a holder, and only Assigned or Under-repair assets may have one.');

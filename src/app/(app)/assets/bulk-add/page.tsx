@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/components/api';
+import { PrintLabelsDialog } from '@/components/labels';
 import { CategorySelect, LocationSelect, useCategories } from '@/components/pickers';
 import { useScannerAdvance } from '@/components/scanner';
 import { Card, ErrorBox, Field, PageHeader, Spinner, useToast } from '@/components/ui';
@@ -16,6 +17,7 @@ export default function BulkAdd() {
   const [err, setErr] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ assetCode: string; id: string; serialNumber: string | null }[] | null>(null);
+  const [labelsOpen, setLabelsOpen] = useState(false);
   const cat = cats?.find((c) => c.id === f.categoryId);
   const prepare = () => { setItems(Array.from({ length: qty }, (_, i) => items[i] ?? { serialNumber: '', hostname: '' })); setDone(null); setTimeout(() => document.querySelector<HTMLInputElement>('input[data-scan]')?.focus(), 50); };
   const save = async (e: React.FormEvent) => {
@@ -69,10 +71,11 @@ export default function BulkAdd() {
         </form>
       )}
       {done && (
-        <Card title={`Created ${done.length} assets`}>
+        <Card title={`Created ${done.length} assets`} actions={<button className="btn btn-sm btn-primary" onClick={() => setLabelsOpen(true)}>Print labels</button>}>
           <ul className="grid gap-1 text-sm sm:grid-cols-3">{done.map((d) => <li key={d.id}><Link href={`/assets/${d.id}`}>{d.assetCode}</Link> <span className="text-slate-500">{d.serialNumber}</span></li>)}</ul>
         </Card>
       )}
+      <PrintLabelsDialog open={labelsOpen} onClose={() => setLabelsOpen(false)} assetIds={(done ?? []).map((d) => d.id)} />
     </div>
   );
 }

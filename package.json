@@ -2,7 +2,7 @@
   "name": "itam",
   "version": "1.0.0",
   "private": true,
-  "description": "IT Asset Lifecycle Management \u2014 Phase 1",
+  "description": "IT Asset Lifecycle Management — Phase 1",
   "scripts": {
     "dev": "concurrently -k -n web,worker \"next dev -p 3000\" \"tsx watch src/worker/main.ts\"",
     "build": "prisma generate && next build",
@@ -32,6 +32,7 @@
     "date-fns": "^4.4.0",
     "date-fns-tz": "^3.2.0",
     "exceljs": "^4.4.0",
+    "jsqr": "^1.4.0",
     "ldapts": "^9.2.0",
     "next": "^15.5.26",
     "nodemailer": "^10.0.13",
