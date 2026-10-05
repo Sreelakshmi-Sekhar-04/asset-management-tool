@@ -105,13 +105,14 @@ Assets and transfers carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-
 | `GET` | `/api/assets/:id` | any signed-in |
 | `PATCH` | `/api/assets/:id` | any signed-in |
 | `GET` | `/api/assets/:id/timeline` | any signed-in |
+| `GET` | `/api/assets/:id/qr` | any signed-in (scoped); `?format=svg|png`, `&download=1` |
 | `POST` | `/api/assets/bulk-add` | ADMIN, IT_OPERATOR |
 | `POST` | `/api/assets/bulk-check-in` | ADMIN, IT_OPERATOR |
 | `POST` | `/api/assets/bulk-reassign` | ADMIN, IT_OPERATOR |
 | `POST` | `/api/assets/bulk-status` | ADMIN, IT_OPERATOR |
 | `POST` | `/api/assets/check-duplicates` | any signed-in |
-| `POST` | `/api/assets/labels` | any signed-in |
-| `GET` | `/api/assets/lookup` | any signed-in |
+| `POST` | `/api/assets/labels` | any signed-in (scoped); body `assetIds`, optional `layout`, `skip`; `?inline=1` for preview |
+| `GET` | `/api/assets/lookup` | any signed-in (scoped); `q` may be an Asset ID, serial, legacy tag or scan link |
 | `GET` | `/api/assets` | any signed-in |
 | `POST` | `/api/assets` | ADMIN, IT_OPERATOR |
 | `GET` | `/api/audit/meta` | ADMIN, IT_OPERATOR |
@@ -190,6 +191,10 @@ Assets and transfers carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-
 | `GET` | `/api/settings/public` | public |
 | `GET` | `/api/settings` | ADMIN, IT_OPERATOR |
 | `PATCH` | `/api/settings` | ADMIN |
+| `GET` | `/api/settings/asset-ids` | ADMIN |
+| `PUT` | `/api/settings/asset-ids` | ADMIN |
+| `POST` | `/api/settings/asset-ids/preview` | ADMIN |
+| `PUT` | `/api/settings/labels` | ADMIN |
 | `POST` | `/api/transfers/:id/cancel` | any signed-in |
 | `GET` | `/api/transfers/:id/lines` | any signed-in |
 | `GET` | `/api/transfers/:id/note` | any signed-in |

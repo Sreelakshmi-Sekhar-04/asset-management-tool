@@ -17,7 +17,7 @@ export default function NewAsset() {
     setBusy(true); setErr(null);
     try {
       const r = await api<{ asset?: { id: string; assetCode: string }; pendingApproval?: { id: string; requestNo: string; policy: string } }>('/api/assets', { body: { ...toPayload(v), duplicateReason: reason || null } });
-      if (r.asset) { toast(`Registered ${r.asset.assetCode}`); router.push(`/assets/${r.asset.id}`); }
+      if (r.asset) { toast(`Registered ${r.asset.assetCode}`); router.push(`/assets/${r.asset.id}?registered=1`); }
       else if (r.pendingApproval) { toast(`Sent for approval (${r.pendingApproval.requestNo}, ${r.pendingApproval.policy})`); router.push(`/approvals/${r.pendingApproval.id}`); }
     } catch (x) { setErr(x); } finally { setBusy(false); }
   };

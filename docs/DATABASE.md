@@ -8,7 +8,7 @@ The `pg_trgm` extension is created by the constraints migration. The database us
 
 | Area | Tables | Notes |
 |---|---|---|
-| Configuration | `settings`, `locations`, `departments`, `asset_categories` | Settings are key/JSON rows over code defaults. Locations form a tree with materialised `idPath` (ids) and `namePath` (names) used for scoping and display. |
+| Configuration | `settings`, `locations`, `departments`, `asset_categories`, `asset_code_counters` | Settings are key/JSON rows over code defaults. Locations form a tree with materialised `idPath` (ids) and `namePath` (names) used for scoping and display. |
 | People and access | `users`, `sessions`, `auth_tokens`, `rate_limits`, `employees` | Sessions and reset/invite tokens store only SHA-256 hashes. Users are separate from employees; a user may link to an employee record. |
 | Register | `assets`, `duplicate_flags`, `asset_assignments`, `asset_movements` | `asset_movements` is the append-only history of every location, holder and status change. `asset_assignments` holds the holder periods. |
 | Transfers | `transfers`, `transfer_lines`, `transfer_receipts`, `transfer_exceptions` | Lines snapshot asset identity at dispatch. Receipts record who received and when. |
@@ -27,6 +27,7 @@ These hold even if application code is bypassed. They are in `20260930000001_con
 
 | Rule | Mechanism |
 |---|---|
+| Asset ID is always system-assigned, in the configured format, unique and never reused | `assets_assign_code` trigger calls `itam_next_asset_code()` ([ASSET-IDS-AND-LABELS.md](ASSET-IDS-AND-LABELS.md)) |
 | Asset ID can never change (AC-01, TC-REG-03) | `assets_guard_update` trigger raises `ASSET_ID_IMMUTABLE` |
 | A retired asset cannot be moved, assigned or edited (remarks excepted) | same trigger raises `ASSET_RETIRED` |
 | Assets are never deleted | `assets_no_delete` trigger |
@@ -53,6 +54,7 @@ Besides the foreign-key and unique indexes, there are indexes on the columns lis
 | `20260930000001_constraints` | Triggers, CHECK constraints, partial unique index, trigram search indexes |
 | `20260930000002_verification_line_asset_fk` | Foreign key from verification lines to assets |
 | `20260930000003_import_report_purge` | `import_jobs.reportPurgedAt` for the import-report retention purge |
+| `20261005000000_asset_id_format` | Category `code`, `asset_code_counters`, configurable Asset ID trigger. Existing Asset IDs are not changed. |
 
 To add one during development: edit `schema.prisma`, then run `npm run db:migrate:dev -- --name <what_changed>` and commit the new folder.
 

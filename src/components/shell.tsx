@@ -14,6 +14,7 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: '', items: [{ href: '/', label: 'Dashboard' }] },
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
+    { href: '/scan', label: 'Scan asset' },
     { href: '/assets/new', label: 'Register asset', roles: IT },
     { href: '/assets/bulk-add', label: 'Bulk add', roles: IT },
     { href: '/imports', label: 'Import', roles: IT },
@@ -40,6 +41,7 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/admin/users', label: 'Users', roles: AD },
     { href: '/admin/locations', label: 'Locations', roles: AD },
     { href: '/admin/master-data', label: 'Categories & departments', roles: AD },
+    { href: '/admin/asset-ids', label: 'Asset IDs & labels', roles: AD },
     { href: '/admin/approval-policies', label: 'Approval policies', roles: AD },
     { href: '/admin/reminder-policies', label: 'Reminder policies', roles: AD },
     { href: '/admin/settings', label: 'Settings', roles: AD },
@@ -110,6 +112,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <input className="input py-1" placeholder="Go to Asset ID, serial or legacy tag" value={lookup} onChange={(e) => { setLookup(e.target.value); setLookupErr(''); }} aria-label="Asset lookup" />
           {lookupErr && <span className="absolute left-0 top-full mt-1 rounded bg-red-600 px-2 py-0.5 text-xs text-white">{lookupErr}</span>}
         </form>
+        <Link href="/scan" className="btn btn-ghost btn-sm" aria-label="Scan an asset label" title="Scan an asset label">📷</Link>
         <div className="ml-auto flex items-center gap-2">
           <Link href="/notifications" className="btn btn-ghost btn-sm relative" aria-label={`Notifications (${unread} unread)`}>
             🔔{unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{unread > 99 ? '99+' : unread}</span>}

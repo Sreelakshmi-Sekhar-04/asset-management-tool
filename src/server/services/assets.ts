@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import { z } from 'zod';
 import type { Asset, Prisma } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
+import { extractAssetCode } from '@/lib/asset-code';
 import { AppError, badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import { dateOnly, todayIST } from '@/lib/format';
 import type { Actor } from '../actor';
@@ -488,7 +489,7 @@ export async function getAssetDetail(actor: Actor, idOrCode: string) {
 
 /** FR-REG-11: global lookup by Asset ID (or exact serial / legacy tag). */
 export async function lookupAsset(actor: Actor, term: string) {
-  const s = term.trim();
+  const s = extractAssetCode(term);
   if (!s) throw badRequest('Enter an Asset ID.');
   const a = await prisma.asset.findFirst({
     where: { AND: [assetScope(actor), { OR: [{ assetCode: s.toUpperCase() }, { serialNormalized: s.toLowerCase() }, { legacyTagNormalized: s.toLowerCase() }] }] },

@@ -45,6 +45,30 @@ export async function download(path: string, body?: unknown) {
   setTimeout(() => URL.revokeObjectURL(url), 5_000);
 }
 
+/**
+ * POST that returns a PDF, opened in a new tab so the browser's viewer gives a print
+ * preview and Print / Save buttons. Falls back to a download if pop-ups are blocked.
+ */
+export async function openFile(path: string, body?: unknown) {
+  const win = window.open('', '_blank');
+  try {
+    const res = await fetch(path, { method: body !== undefined ? 'POST' : 'GET', headers: body !== undefined ? { 'content-type': 'application/json' } : undefined, body: body !== undefined ? JSON.stringify(body) : undefined });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      throw new ApiError(res.status, j?.error?.code ?? 'ERROR', j?.error?.message ?? res.statusText, j?.error?.details);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    if (win) { win.location.href = url; setTimeout(() => URL.revokeObjectURL(url), 60_000); return; }
+    const a = document.createElement('a');
+    a.href = url; a.download = /filename="?([^";]+)"?/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'labels.pdf';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5_000);
+  } catch (e) {
+    win?.close();
+    throw e;
+  }
+}
+
 export function useApi<T = unknown>(path: string | null, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);

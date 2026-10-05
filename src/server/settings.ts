@@ -1,4 +1,5 @@
 import { prisma, type Db } from '@/lib/db';
+import { DEFAULT_ASSET_ID_FORMAT, DEFAULT_LABEL_SETTINGS, type AssetIdFormat, type LabelSettings } from '@/lib/asset-code';
 
 export type DuplicateSeverity = 'BLOCK' | 'WARN' | 'OFF';
 
@@ -23,6 +24,9 @@ export interface Settings {
   scannerAdvanceKey: 'Enter' | 'Tab';
   verificationReminderDays: number[];
   notificationEmail: Record<string, boolean>;
+  /** Read by the database when it assigns an Asset ID; change it through the Asset IDs & labels screen. */
+  assetIdFormat: AssetIdFormat;
+  labels: LabelSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -55,6 +59,8 @@ export const DEFAULT_SETTINGS: Settings = {
     TRANSFER_RECEIVED: false, TRANSFER_COMPLETED: false, TRANSFER_AGING: true, APPROVAL_REQUESTED: true, APPROVAL_DECIDED: true,
     VERIFICATION: true, RENEWAL: true, INTEGRATION_FAILURE: true, IMPORT_COMPLETED: false,
   },
+  assetIdFormat: DEFAULT_ASSET_ID_FORMAT,
+  labels: DEFAULT_LABEL_SETTINGS,
 };
 
 let cache: { at: number; value: Settings } | null = null;
@@ -66,6 +72,8 @@ export async function getSettings(db: Db = prisma): Promise<Settings> {
   for (const r of rows) merged[r.key] = r.value;
   merged.duplicateRules = { ...DEFAULT_SETTINGS.duplicateRules, ...(merged.duplicateRules as object) };
   merged.notificationEmail = { ...DEFAULT_SETTINGS.notificationEmail, ...(merged.notificationEmail as object) };
+  merged.assetIdFormat = { ...DEFAULT_SETTINGS.assetIdFormat, ...(merged.assetIdFormat as object) };
+  merged.labels = { ...DEFAULT_SETTINGS.labels, ...(merged.labels as object) };
   const value = merged as unknown as Settings;
   cache = { at: Date.now(), value };
   return value;

@@ -1,7 +1,9 @@
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
 import { prisma } from '@/lib/db';
-import { badRequest } from '@/lib/errors';
+import { z } from 'zod';
+import { scanPath, type LabelSettings } from '@/lib/asset-code';
+import { badRequest, notFound } from '@/lib/errors';
 import { fmtDateOnly, fmtDateTime } from '@/lib/format';
 import { label, LINE_STATUS_LABEL, TRANSFER_STATUS_LABEL } from '@/lib/labels';
 import type { Actor } from './actor';
@@ -99,40 +101,115 @@ export async function transferNotePdf(actor: Actor, id: string) {
   return { data, mime: 'application/pdf', file: `${tr.transferNo}.pdf` };
 }
 
+const MM = 72 / 25.4;
+
+/** What the QR code on a label holds: the bare Asset ID, or a link that opens the asset. */
+export function qrPayload(assetCode: string, labels: LabelSettings) {
+  return labels.qrContent === 'LINK' ? `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '')}${scanPath(assetCode)}` : assetCode;
+}
+
+/** Largest font size (down to 5 pt) at which the text fits on one line. */
+function fitSize(doc: PDFKit.PDFDocument, text: string, font: string, max: number, width: number) {
+  doc.font(font);
+  let size = max;
+  while (size > 5 && doc.fontSize(size).widthOfString(text) > width) size -= 0.5;
+  return size;
+}
+
+type LabelAsset = { assetCode: string; make: string; model: string; serialNumber: string | null; location: { name: string } | null };
+
 /**
- * FR-REG-10: printable labels, single or batch. Each carries a QR code encoding the
- * Asset ID, plus the human-readable ID and branch. A4 sheet, 3 × 8 labels.
+ * One label in the box (x, y, w, h). Wide labels put the details beside the QR code;
+ * narrow or square labels stack the Asset ID under it.
  */
-export async function labelsPdf(actor: Actor, assetIds: string[]) {
-  if (!assetIds.length) throw badRequest('Select at least one asset.');
-  if (assetIds.length > 2000) throw badRequest('At most 2,000 labels per batch.');
+async function drawLabel(doc: PDFKit.PDFDocument, a: LabelAsset, box: { x: number; y: number; w: number; h: number }, labels: LabelSettings, orgName: string) {
+  const qr = await QRCode.toBuffer(qrPayload(a.assetCode, labels), { errorCorrectionLevel: 'M', margin: 1, width: 300 });
+  const pad = Math.max(3, Math.min(box.w, box.h) * 0.06);
+  doc.fillColor('#000');
+  if (box.w / box.h < 1.5) {
+    const idH = Math.max(8, box.h * 0.14);
+    const q = Math.min(box.w - pad * 2, box.h - pad * 2 - idH);
+    doc.image(qr, box.x + (box.w - q) / 2, box.y + pad, { width: q, height: q });
+    const size = fitSize(doc, a.assetCode, 'Helvetica-Bold', idH, box.w - pad * 2);
+    doc.font('Helvetica-Bold').fontSize(size).text(a.assetCode, box.x + pad, box.y + pad + q + 1, { width: box.w - pad * 2, align: 'center', lineBreak: false });
+    return;
+  }
+  const q = box.h - pad * 2;
+  doc.image(qr, box.x + pad, box.y + pad, { width: q, height: q });
+  const tx = box.x + pad * 2 + q, tw = box.w - q - pad * 3;
+  const idSize = fitSize(doc, a.assetCode, 'Helvetica-Bold', Math.min(14, box.h * 0.2), tw);
+  let y = box.y + pad;
+  doc.font('Helvetica-Bold').fontSize(idSize).text(a.assetCode, tx, y, { width: tw, lineBreak: false });
+  y += idSize * 1.3;
+  const small = Math.max(5, Math.min(7.5, box.h * 0.1));
+  const lines = [a.location?.name ?? '', `${a.make} ${a.model}`, a.serialNumber ? `S/N ${a.serialNumber}` : ''].filter(Boolean);
+  doc.fillColor('#333');
+  for (const l of lines) {
+    if (y + small * 1.2 > box.y + box.h - pad - small) break;
+    // Shrink long serials and model names to fit rather than cutting them off.
+    doc.font('Helvetica').fontSize(Math.min(small, fitSize(doc, l, 'Helvetica', small, tw)));
+    doc.text(l, tx, y, { width: tw, height: small * 1.2, ellipsis: true, lineBreak: false });
+    y += small * 1.25;
+  }
+  doc.fontSize(Math.max(5, small - 1)).fillColor('#777').text(orgName, tx, box.y + box.h - pad - small, { width: tw, height: small * 1.2, ellipsis: true, lineBreak: false });
+}
+
+export const labelsInput = z.object({
+  assetIds: z.array(z.string()).min(1, 'Select at least one asset.').max(2000, 'At most 2,000 labels per batch.'),
+  /** Overrides the configured layout for this print run. */
+  layout: z.enum(['A4_SHEET', 'LABEL_PRINTER']).optional(),
+  /** A4 sheet only: leave this many label positions empty, to reuse a partly used sheet. */
+  skip: z.number().int().min(0).max(23).optional(),
+});
+
+/**
+ * FR-REG-10: printable labels, single or batch. Each carries a QR code for the Asset ID
+ * (or a link to it, per the label settings), the human-readable Asset ID and the branch.
+ * A4 sheet (3 × 8) or one label per page for a label printer.
+ */
+export async function labelsPdf(actor: Actor, input: unknown) {
+  const d = labelsInput.parse(input);
   const assets = await prisma.asset.findMany({
-    where: { AND: [assetScope(actor), { OR: [{ id: { in: assetIds } }, { assetCode: { in: assetIds.map((x) => x.toUpperCase()) } }] }] },
+    where: { AND: [assetScope(actor), { OR: [{ id: { in: d.assetIds } }, { assetCode: { in: d.assetIds.map((x) => x.toUpperCase()) } }] }] },
     select: { id: true, assetCode: true, make: true, model: true, serialNumber: true, location: { select: { name: true, namePath: true } } },
     orderBy: { assetCode: 'asc' },
   });
   if (!assets.length) throw badRequest('None of the selected assets are within your scope.');
   const settings = await getSettings();
-  const doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: 'Asset labels', Author: settings.orgName } });
-  const cols = 3, rows = 8, mx = 20, my = 25;
-  const lw = (doc.page.width - mx * 2) / cols, lh = (doc.page.height - my * 2) / rows;
-  for (let i = 0; i < assets.length; i++) {
-    if (i > 0 && i % (cols * rows) === 0) doc.addPage();
-    const a = assets[i];
-    const k = i % (cols * rows);
-    const x = mx + (k % cols) * lw, y = my + Math.floor(k / cols) * lh;
-    doc.rect(x + 3, y + 3, lw - 6, lh - 6).lineWidth(0.4).strokeColor('#bbb').stroke();
-    const qr = await QRCode.toBuffer(a.assetCode, { errorCorrectionLevel: 'M', margin: 1, width: 240 });
-    const q = lh - 20;
-    doc.image(qr, x + 8, y + 10, { width: q, height: q });
-    const tx = x + 14 + q, tw = lw - q - 24;
-    doc.fillColor('#000').font('Helvetica-Bold').fontSize(12).text(a.assetCode, tx, y + 12, { width: tw });
-    doc.font('Helvetica').fontSize(7.5).text(a.location?.name ?? '', tx, y + 30, { width: tw, height: 20, ellipsis: true });
-    doc.fontSize(6.5).fillColor('#444').text(`${a.make} ${a.model}`, tx, y + 52, { width: tw, height: 16, ellipsis: true });
-    if (a.serialNumber) doc.text(`S/N ${a.serialNumber}`, tx, y + 68, { width: tw, height: 9, ellipsis: true });
-    doc.fontSize(6).fillColor('#777').text(settings.orgName, tx, y + lh - 20, { width: tw, height: 9, ellipsis: true });
+  const labels = settings.labels;
+  const layout = d.layout ?? labels.layout;
+  let doc: PDFKit.PDFDocument;
+  if (layout === 'LABEL_PRINTER') {
+    const size: [number, number] = [labels.labelWidthMm * MM, labels.labelHeightMm * MM];
+    doc = new PDFDocument({ size, margin: 0, autoFirstPage: false, info: { Title: 'Asset labels', Author: settings.orgName } });
+    for (const a of assets) {
+      doc.addPage({ size, margin: 0 });
+      await drawLabel(doc, a, { x: 0, y: 0, w: size[0], h: size[1] }, labels, settings.orgName);
+    }
+  } else {
+    doc = new PDFDocument({ size: 'A4', margin: 0, info: { Title: 'Asset labels', Author: settings.orgName } });
+    const cols = 3, rows = 8, mx = 20, my = 25, per = cols * rows;
+    const lw = (doc.page.width - mx * 2) / cols, lh = (doc.page.height - my * 2) / rows;
+    const skip = d.skip ?? 0;
+    for (let i = 0; i < assets.length; i++) {
+      const slot = i + skip;
+      if (i > 0 && slot % per === 0) doc.addPage();
+      const k = slot % per;
+      const x = mx + (k % cols) * lw, y = my + Math.floor(k / cols) * lh;
+      doc.rect(x + 3, y + 3, lw - 6, lh - 6).lineWidth(0.4).strokeColor('#bbb').stroke();
+      await drawLabel(doc, assets[i], { x: x + 3, y: y + 3, w: lw - 6, h: lh - 6 }, labels, settings.orgName);
+    }
   }
   const data = await toBuffer(doc);
-  await audit(prisma, actor, { action: 'LABELS_GENERATED', entityType: 'Asset', entityLabel: `${assets.length} label(s)`, details: { assets: assets.slice(0, 200).map((a) => a.assetCode), count: assets.length } });
-  return { data, mime: 'application/pdf', file: `asset-labels-${new Date().toISOString().slice(0, 10)}.pdf`, count: assets.length };
+  await audit(prisma, actor, { action: 'LABELS_GENERATED', entityType: 'Asset', entityId: assets.length === 1 ? assets[0].id : undefined, entityLabel: assets.length === 1 ? assets[0].assetCode : `${assets.length} label(s)`, details: { assets: assets.slice(0, 200).map((a) => a.assetCode), count: assets.length, layout } });
+  return { data, mime: 'application/pdf', file: assets.length === 1 ? `label-${assets[0].assetCode}.pdf` : `asset-labels-${new Date().toISOString().slice(0, 10)}.pdf`, count: assets.length };
+}
+
+/** The QR code for one asset, as SVG (for the screen) or PNG (to download). Scope enforced. */
+export async function assetQr(actor: Actor, id: string, format: 'svg' | 'png') {
+  const a = await prisma.asset.findFirst({ where: { AND: [assetScope(actor), { OR: [{ id }, { assetCode: id.toUpperCase() }] }] }, select: { assetCode: true } });
+  if (!a) throw notFound('Asset');
+  const payload = qrPayload(a.assetCode, (await getSettings()).labels);
+  if (format === 'png') return { data: await QRCode.toBuffer(payload, { errorCorrectionLevel: 'M', margin: 2, width: 600 }), mime: 'image/png', file: `qr-${a.assetCode}.png`, payload };
+  return { data: Buffer.from(await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M', margin: 1 })), mime: 'image/svg+xml', file: `qr-${a.assetCode}.svg`, payload };
 }
