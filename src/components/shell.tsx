@@ -57,6 +57,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [lookup, setLookup] = useState('');
   const [lookupErr, setLookupErr] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => { try { setExpanded(new Set(JSON.parse(localStorage.getItem('itam:nav') ?? '[]') as string[])); } catch { /* storage unavailable */ } }, []);
   useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
     let alive = true;
@@ -80,16 +82,31 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
   };
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); window.location.href = '/login'; };
+  // Groups fold so the menu fits the screen: the group holding the current page is always
+  // open; others open on click and stay as the user left them.
+  const activeGroup = NAV.find((g) => g.items.some((i) => isActive(i.href)))?.group ?? '';
+  const toggleGroup = (g: string) => setExpanded((x) => {
+    const n = new Set(x);
+    if (n.has(g)) n.delete(g); else n.add(g);
+    try { localStorage.setItem('itam:nav', JSON.stringify([...n])); } catch { /* storage unavailable */ }
+    return n;
+  });
   const nav = (
-    <nav className="space-y-4 px-3 py-4 text-sm">
+    <nav className="space-y-1 px-3 py-3 text-sm">
       {NAV.map((g) => {
         const items = g.items.filter((i) => !i.roles || i.roles.includes(me.role));
         if (!items.length) return null;
+        const shown = !g.group || g.group === activeGroup || expanded.has(g.group);
         return (
           <div key={g.group}>
-            {g.group && <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{g.group}</div>}
-            {items.map((i) => (
-              <Link key={i.href} href={i.href} className={clsx('block rounded-md px-2 py-1.5 no-underline hover:no-underline', isActive(i.href) ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-700 hover:bg-slate-100')}>{i.label}</Link>
+            {g.group && (
+              <button type="button" onClick={() => toggleGroup(g.group)} aria-expanded={shown} disabled={g.group === activeGroup}
+                className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600 disabled:cursor-default disabled:hover:text-slate-400">
+                {g.group}<span aria-hidden className="text-[10px]">{shown ? '▾' : '▸'}</span>
+              </button>
+            )}
+            {shown && items.map((i) => (
+              <Link key={i.href} href={i.href} className={clsx('block rounded-md px-2 py-1 no-underline hover:no-underline', isActive(i.href) ? 'bg-brand-50 font-medium text-brand-700' : 'text-slate-700 hover:bg-slate-100')}>{i.label}</Link>
             ))}
           </div>
         );

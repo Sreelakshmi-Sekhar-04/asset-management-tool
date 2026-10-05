@@ -39,7 +39,7 @@ Location is deliberately not part of the ID: assets move between branches throug
 
 | Where | How |
 |---|---|
-| Assets › Scan asset (`/scan`), and the camera button in the top bar | Phone or laptop camera, or typing / USB scanner. Shows status, location, holder and open transfer, with Open asset, Transfer and Print label. |
+| Assets › Scan asset (`/scan`), and the camera button in the top bar | Phone or laptop camera, or typing / USB scanner. A match opens the asset page straight away, with a Scan next button. |
 | Global search box (all screens) | USB / keyboard-wedge scanner or typing; opens the asset |
 | Verification task | Scan or type, or "Scan with camera"; marks the line present |
 | Phone camera app | With link-style QR content, opens `/scan/<Asset ID>`, which redirects to the asset |

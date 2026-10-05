@@ -36,7 +36,9 @@ export default function AssetDetail() {
   const { data: a, error, reload } = useApi<Detail>(`/api/assets/${id}`);
   const [tab, setTab] = useState('overview');
   const [dlg, setDlg] = useState<Dialog>('');
-  const justRegistered = useSearchParams().get('registered') === '1';
+  const sp = useSearchParams();
+  const justRegistered = sp.get('registered') === '1';
+  const scanned = sp.get('scanned') === '1';
   if (error) return <ErrorBox error={error} />;
   if (!a) return <div className="flex justify-center py-20"><Spinner /></div>;
   const retired = a.status === 'RETIRED';
@@ -65,6 +67,7 @@ export default function AssetDetail() {
         </>} />
 
       {justRegistered && <div className="flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm">Registered as <b className="font-mono">{a.assetCode}</b>. Print its label and attach it to the device.<button className="btn btn-sm btn-primary" onClick={() => setDlg('label')}>Print label</button></div>}
+      {scanned && <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">Opened from a scan.<Link className="btn btn-sm" href="/scan">Scan next</Link></div>}
       {a.openTransfer && <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">In open transfer <Link href={`/transfers/${a.openTransfer.id}`}>{a.openTransfer.transferNo}</Link> to {a.openTransfer.toLocation}. Location, holder and status are locked until it is received or recalled.</div>}
       {a.pendingApprovals.map((p) => <div key={p.id} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">Pending approval <Link href={`/approvals/${p.id}`}>{p.requestNo}</Link>: {p.summary}. The asset is locked until it is decided.</div>)}
       {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Transfer exception: {x.reason} · <Link href={`/transfers/${x.transferId}`}>open transfer</Link> · <Link href="/transfers/exceptions">resolve</Link></div>)}
