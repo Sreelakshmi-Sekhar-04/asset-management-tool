@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body { @apply bg-slate-50 text-slate-900 antialiased; }
+  h1 { @apply text-xl font-semibold text-slate-900; }
+  h2 { @apply text-base font-semibold text-slate-900; }
+  a { @apply text-brand-600 hover:underline; }
+  :focus-visible { @apply outline-none ring-2 ring-brand-500 ring-offset-1; }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap no-underline hover:no-underline; }
+  .btn-primary { @apply border-brand-600 bg-brand-600 text-white hover:bg-brand-700; }
+  .btn-danger { @apply border-red-600 bg-red-600 text-white hover:bg-red-700; }
+  .btn-ghost { @apply border-transparent bg-transparent shadow-none hover:bg-slate-100; }
+  .btn-sm { @apply px-2 py-1 text-xs; }
+  .input { @apply block w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm shadow-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:bg-slate-100; }
+  .input-error { @apply border-red-500 focus:border-red-500 focus:ring-red-500; }
+  .field-label { @apply mb-1 block text-xs font-medium text-slate-600; }
+  .card { @apply rounded-lg border border-slate-200 bg-white shadow-sm; }
+  .card-body { @apply p-4; }
+  .badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap; }
+  .table-wrap { @apply overflow-x-auto; }
+  .tbl { @apply min-w-full divide-y divide-slate-200 text-sm; }
+  .tbl th { @apply bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 whitespace-nowrap; }
+  .tbl td { @apply px-3 py-2 align-top text-slate-700; }
+  .tbl tbody tr { @apply hover:bg-slate-50; }
+  .kv { @apply grid grid-cols-[minmax(8rem,auto)_1fr] gap-x-4 gap-y-1.5 text-sm; }
+  .kv dt { @apply text-slate-500; }
+  .kv dd { @apply text-slate-900 break-words; }
+}
