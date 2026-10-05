@@ -16,6 +16,7 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/assets', label: 'Asset register' },
     { href: '/scan', label: 'Scan asset' },
     { href: '/assets/new', label: 'Register asset', roles: IT },
+    { href: '/assets/scan-register', label: 'Scan to register', roles: IT },
     { href: '/assets/bulk-add', label: 'Bulk add', roles: IT },
     { href: '/imports', label: 'Import', roles: IT },
     { href: '/employees', label: 'Employees' },
