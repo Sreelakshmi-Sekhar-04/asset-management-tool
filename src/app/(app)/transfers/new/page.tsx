@@ -1,9 +1,11 @@
 'use client';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { extractAssetCode } from '@/lib/asset-code';
 import { todayIST } from '@/lib/format';
 import { api, qs, useApi } from '@/components/api';
 import { AssetStatus } from '@/components/badges';
+import { CameraScanner } from '@/components/camera-scanner';
 import { useMe } from '@/components/me';
 import { LocationSelect, useLocations } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
@@ -51,6 +53,32 @@ export default function NewTransfer() {
     if (!fromSelection) setPaste('');
   }
 
+  // Camera scanning: each scan adds one asset and reports what happened to it.
+  const [camera, setCamera] = useState(false);
+  const [scans, setScans] = useState<{ n: number; code: string; tone: 'green' | 'amber' | 'red'; text: string }[]>([]);
+  const scanBusy = useRef(false);
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
+  const logScan = (code: string, tone: 'green' | 'amber' | 'red', text: string) => setScans((l) => [{ n: Date.now(), code, tone, text }, ...l].slice(0, 20));
+  async function onCameraScan(raw: string) {
+    const code = extractAssetCode(raw);
+    if (!code || scanBusy.current) return;
+    const has = (m: Map<string, Pick>) => [...m.values()].find((a) => a.assetCode.toUpperCase() === code.toUpperCase() || a.serialNumber?.toUpperCase() === code.toUpperCase());
+    const dup = has(pickedRef.current);
+    if (dup) { logScan(code, 'amber', `${dup.assetCode} is already in this transfer.`); return; }
+    scanBusy.current = true;
+    try {
+      const r = await api<{ found: Pick[]; unresolved: string[]; invalid: { assetCode: string; message: string }[] }>('/api/transfers/resolve-identifiers', { body: { text: code, fromLocationId: from || undefined } });
+      const a = r.found[0];
+      if (a && pickedRef.current.has(a.id)) logScan(code, 'amber', `${a.assetCode} is already in this transfer.`);
+      else if (a) { setPicked((m) => new Map(m).set(a.id, a)); logScan(code, 'green', `Added ${a.assetCode} · ${a.make} ${a.model}`); }
+      else if (r.invalid[0]) logScan(code, 'red', r.invalid[0].message);
+      else logScan(code, 'red', `No asset matches "${code}" in your scope.`);
+    } catch {
+      logScan(code, 'red', `"${code}" could not be looked up just now. Check your connection and scan again.`);
+    } finally { scanBusy.current = false; }
+  }
+
   const browseQuery = useMemo(() => (from ? `/api/assets${qs({ locationId: from, hasOpenTransfer: 'false', status: ['IN_STOCK', 'ASSIGNED', 'UNDER_REPAIR'], search: '', pageSize: 500, sort: 'assetCode', dir: 'asc' })}` : null), [from]);
   const { data: browse, loading: browsing } = useApi<{ rows: Pick[]; total: number }>(browseQuery);
   const [filterText, setFilterText] = useState('');
@@ -96,6 +124,21 @@ export default function NewTransfer() {
             <Tabs value={tab} onChange={setTab} tabs={[{ key: 'browse', label: 'Pick from location' }, { key: 'paste', label: 'Paste or scan IDs' }]} />
             {tab === 'paste' && (
               <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button className="btn btn-sm" onClick={() => setCamera((c) => !c)}>{camera ? 'Turn off camera' : 'Scan with camera'}</button>
+                  <span className="text-xs text-slate-500">Point the camera at each asset label; every scan is added below. USB and Bluetooth scanners type into the box instead.</span>
+                </div>
+                {camera && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <CameraScanner onScan={onCameraScan} />
+                    <ul className="max-h-72 space-y-1 overflow-auto text-xs" aria-live="polite">
+                      {!scans.length && <li className="text-slate-500">Scanned assets appear here.</li>}
+                      {scans.map((x) => (
+                        <li key={x.n} className={x.tone === 'green' ? 'rounded bg-green-50 p-1.5 text-green-900' : x.tone === 'amber' ? 'rounded bg-amber-50 p-1.5 text-amber-900' : 'rounded bg-red-50 p-1.5 text-red-900'}>{x.text}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <textarea className="input font-mono text-xs" rows={5} placeholder="Asset IDs, serial numbers or legacy tags — one per line, or separated by commas or spaces. A scanner can type straight into this box." value={paste} onChange={(e) => setPaste(e.target.value)} />
                 <button className="btn" disabled={!paste.trim()} onClick={() => resolve(paste).catch((e) => setErr(e))}>Add to transfer</button>
                 {resolveRes && (resolveRes.unresolved.length > 0 || resolveRes.invalid.length > 0) && (
