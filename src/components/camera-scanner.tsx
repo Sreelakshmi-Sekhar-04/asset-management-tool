@@ -20,7 +20,8 @@ function cameraError(e: unknown) {
 
 /**
  * Live camera QR reader. Uses the browser's built-in BarcodeDetector where available
- * (Chrome on Android) and the bundled jsQR decoder elsewhere (iPhone, desktop).
+ * (Chrome on Android, which also reads the label's Code 128 barcode) and the bundled jsQR
+ * decoder elsewhere (iPhone, desktop), which reads the QR code.
  * Calls onScan once per code; the same code is ignored for a few seconds.
  */
 export function CameraScanner({ onScan, paused = false, className }: { onScan: (text: string) => void; paused?: boolean; className?: string }) {
@@ -60,7 +61,8 @@ export function CameraScanner({ onScan, paused = false, className }: { onScan: (
       const formats: string[] = (await window.BarcodeDetector?.getSupportedFormats?.().catch(() => [] as string[])) ?? [];
       const native = formats.includes('qr_code');
       if (native && window.BarcodeDetector) {
-        const d = new window.BarcodeDetector({ formats: ['qr_code'] });
+        // Where the browser can, also read the Code 128 barcode printed under the QR code.
+        const d = new window.BarcodeDetector({ formats: ['qr_code', ...(formats.includes('code_128') ? ['code_128'] : [])] });
         detect = async (v) => (await d.detect(v))[0]?.rawValue ?? null;
       } else {
         const jsQR = (await import('jsqr')).default;

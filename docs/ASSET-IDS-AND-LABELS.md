@@ -33,18 +33,19 @@ Location is deliberately not part of the ID: assets move between branches throug
 - **Asset page › QR code and label**: preview, download PNG, print label. After registering an asset the page offers to print its label straight away.
 - **Asset register**: select assets › Print labels. **Bulk add**: Print labels for the batch just created.
 - **Layouts**: A4 sheet with 24 labels (3 × 8), with "start at label position" to reuse a partly used sheet; or a label printer, one label per page at a configured size in mm. Labels at least 1.5× as wide as high show branch, make/model and serial beside the code; narrower labels show the Asset ID under it.
-- The PDF opens in a new tab, which is the print preview. Label generation is audited (`LABELS_GENERATED`).
+- **Barcode** (setting, on by default): a Code 128 barcode of the bare Asset ID runs along the bottom of every label, for handheld laser / 1D scanners that cannot read QR codes. The QR code is always printed too.
+- The print dialog shows a live, to-scale preview of the label for the chosen stock (and, on A4, which sheet positions will be used). The PDF and the preview share one layout (`src/lib/label-layout.ts`), so what you see is what prints. The PDF opens in a new tab to print. Label generation is audited (`LABELS_GENERATED`).
 
 ## Scanning
 
 | Where | How |
 |---|---|
 | Assets › Scan asset (`/scan`), and the camera button in the top bar | Phone or laptop camera, or typing / USB scanner. A match opens the asset page straight away, with a Scan next button. |
-| Global search box (all screens) | USB / keyboard-wedge scanner or typing; opens the asset |
+| Global search box (all screens) | USB / Bluetooth scanner reading the QR code or the barcode (both carry the Asset ID), or typing; opens the asset |
 | Verification task | Scan or type, or "Scan with camera"; marks the line present |
 | Phone camera app | With link-style QR content, opens `/scan/<Asset ID>`, which redirects to the asset |
 
-The camera reader uses the browser's BarcodeDetector where available and the bundled `jsqr` decoder elsewhere (iPhone, desktop). The camera needs HTTPS (or localhost); the `Permissions-Policy` header allows the camera for this site only. Clear messages cover a denied permission, no camera, a camera in use, an insecure connection, an unknown code and an out-of-scope asset.
+The camera reader uses the browser's BarcodeDetector where available (Android Chrome, which also reads the barcode) and the bundled `jsqr` decoder elsewhere (iPhone, desktop), which reads the QR code. A handheld scanner reads either code and types the Asset ID into the focused box. The camera needs HTTPS (or localhost); the `Permissions-Policy` header allows the camera for this site only. Clear messages cover a denied permission, no camera, a camera in use, an insecure connection, an unknown code and an out-of-scope asset.
 
 ## Permissions
 

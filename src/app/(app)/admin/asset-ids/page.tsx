@@ -115,6 +115,11 @@ export default function AssetIdsPage() {
           <label className="mt-2 flex items-start gap-2 text-sm"><input type="radio" className="mt-1" checked={l.qrContent === 'LINK'} onChange={() => setL({ ...l, qrContent: 'LINK' })} />
             <span>A link to the asset <span className="block text-xs text-slate-500">A phone&apos;s own camera opens the asset after sign-in: <span className="font-mono">{data.appUrl.replace(/\/+$/, '')}/scan/AST-000001</span>. Labels stop opening from a phone camera if this address changes, but still scan inside the app.</span></span></label>
         </fieldset>
+        <label className="mt-4 flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1" checked={l.barcode} onChange={(e) => setL({ ...l, barcode: e.target.checked })} />
+          <span>Also print a barcode (Code 128) of the Asset ID under the QR code
+            <span className="block text-xs text-slate-500">For handheld laser or 1D barcode scanners, which cannot read QR codes. The QR code is always printed.</span></span>
+        </label>
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <Field label="Default layout">
             <select className="input" value={l.layout} onChange={(e) => setL({ ...l, layout: e.target.value as LabelSettings['layout'] })}>

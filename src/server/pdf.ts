@@ -3,6 +3,8 @@ import QRCode from 'qrcode';
 import { prisma } from '@/lib/db';
 import { z } from 'zod';
 import { scanPath, type LabelSettings } from '@/lib/asset-code';
+import { code128Widths } from '@/lib/code128';
+import { layoutLabel, MM } from '@/lib/label-layout';
 import { badRequest, notFound } from '@/lib/errors';
 import { fmtDateOnly, fmtDateTime } from '@/lib/format';
 import { label, LINE_STATUS_LABEL, TRANSFER_STATUS_LABEL } from '@/lib/labels';
@@ -101,57 +103,34 @@ export async function transferNotePdf(actor: Actor, id: string) {
   return { data, mime: 'application/pdf', file: `${tr.transferNo}.pdf` };
 }
 
-const MM = 72 / 25.4;
-
 /** What the QR code on a label holds: the bare Asset ID, or a link that opens the asset. */
 export function qrPayload(assetCode: string, labels: LabelSettings) {
   return labels.qrContent === 'LINK' ? `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '')}${scanPath(assetCode)}` : assetCode;
 }
 
-/** Largest font size (down to 5 pt) at which the text fits on one line. */
-function fitSize(doc: PDFKit.PDFDocument, text: string, font: string, max: number, width: number) {
-  doc.font(font);
-  let size = max;
-  while (size > 5 && doc.fontSize(size).widthOfString(text) > width) size -= 0.5;
-  return size;
-}
-
 type LabelAsset = { assetCode: string; make: string; model: string; serialNumber: string | null; location: { name: string } | null };
 
-/**
- * One label in the box (x, y, w, h). Wide labels put the details beside the QR code;
- * narrow or square labels stack the Asset ID under it.
- */
+/** Draws one label in the box; positions come from layoutLabel(), which the print preview also uses. */
 async function drawLabel(doc: PDFKit.PDFDocument, a: LabelAsset, box: { x: number; y: number; w: number; h: number }, labels: LabelSettings, orgName: string) {
-  const qr = await QRCode.toBuffer(qrPayload(a.assetCode, labels), { errorCorrectionLevel: 'M', margin: 1, width: 300 });
-  const pad = Math.max(3, Math.min(box.w, box.h) * 0.06);
-  doc.fillColor('#000');
-  if (box.w / box.h < 1.5) {
-    const idH = Math.max(8, box.h * 0.14);
-    const q = Math.min(box.w - pad * 2, box.h - pad * 2 - idH);
-    doc.image(qr, box.x + (box.w - q) / 2, box.y + pad, { width: q, height: q });
-    const size = fitSize(doc, a.assetCode, 'Helvetica-Bold', idH, box.w - pad * 2);
-    doc.font('Helvetica-Bold').fontSize(size).text(a.assetCode, box.x + pad, box.y + pad + q + 1, { width: box.w - pad * 2, align: 'center', lineBreak: false });
-    return;
+  const measure = (t: string, size: number, bold: boolean) => doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).widthOfString(t);
+  const content = { assetCode: a.assetCode, location: a.location?.name ?? null, makeModel: `${a.make} ${a.model}`, serial: a.serialNumber, orgName };
+  for (const el of layoutLabel(box.w, box.h, content, { barcode: labels.barcode }, measure)) {
+    if (el.kind === 'qr') {
+      const qr = await QRCode.toBuffer(qrPayload(a.assetCode, labels), { errorCorrectionLevel: 'M', margin: 1, width: 300 });
+      doc.image(qr, box.x + el.x, box.y + el.y, { width: el.size, height: el.size });
+    } else if (el.kind === 'barcode') {
+      // Code 128 of the bare Asset ID, with a quiet zone of 10 modules each side.
+      const widths = code128Widths(a.assetCode);
+      const modules = widths.reduce((n, x) => n + x, 0) + 20;
+      const m = el.w / modules;
+      let x = box.x + el.x + m * 10;
+      doc.fillColor('#000');
+      widths.forEach((wd, i) => { if (i % 2 === 0) doc.rect(x, box.y + el.y, wd * m, el.h).fill(); x += wd * m; });
+    } else {
+      doc.font(el.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(el.size).fillColor(el.color)
+        .text(el.text, box.x + el.x, box.y + el.y, { width: el.w, align: el.align, lineBreak: false, height: el.size * 1.2, ellipsis: true });
+    }
   }
-  const q = box.h - pad * 2;
-  doc.image(qr, box.x + pad, box.y + pad, { width: q, height: q });
-  const tx = box.x + pad * 2 + q, tw = box.w - q - pad * 3;
-  const idSize = fitSize(doc, a.assetCode, 'Helvetica-Bold', Math.min(14, box.h * 0.2), tw);
-  let y = box.y + pad;
-  doc.font('Helvetica-Bold').fontSize(idSize).text(a.assetCode, tx, y, { width: tw, lineBreak: false });
-  y += idSize * 1.3;
-  const small = Math.max(5, Math.min(7.5, box.h * 0.1));
-  const lines = [a.location?.name ?? '', `${a.make} ${a.model}`, a.serialNumber ? `S/N ${a.serialNumber}` : ''].filter(Boolean);
-  doc.fillColor('#333');
-  for (const l of lines) {
-    if (y + small * 1.2 > box.y + box.h - pad - small) break;
-    // Shrink long serials and model names to fit rather than cutting them off.
-    doc.font('Helvetica').fontSize(Math.min(small, fitSize(doc, l, 'Helvetica', small, tw)));
-    doc.text(l, tx, y, { width: tw, height: small * 1.2, ellipsis: true, lineBreak: false });
-    y += small * 1.25;
-  }
-  doc.fontSize(Math.max(5, small - 1)).fillColor('#777').text(orgName, tx, box.y + box.h - pad - small, { width: tw, height: small * 1.2, ellipsis: true, lineBreak: false });
 }
 
 export const labelsInput = z.object({

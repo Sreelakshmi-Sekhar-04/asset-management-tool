@@ -30,6 +30,7 @@ export const labelSettingsInput = z.object({
   layout: z.enum(['A4_SHEET', 'LABEL_PRINTER']),
   labelWidthMm: z.number().int().min(25, 'At least 25 mm wide.').max(150, 'At most 150 mm wide.'),
   labelHeightMm: z.number().int().min(15, 'At least 15 mm high.').max(100, 'At most 100 mm high.'),
+  barcode: z.boolean(),
 });
 
 /** The number the shared sequence will hand out next. */

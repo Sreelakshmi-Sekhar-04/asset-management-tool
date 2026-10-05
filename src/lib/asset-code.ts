@@ -28,9 +28,11 @@ export interface LabelSettings {
   layout: 'A4_SHEET' | 'LABEL_PRINTER';
   labelWidthMm: number;
   labelHeightMm: number;
+  /** Also print a Code 128 barcode of the Asset ID, for 1D (laser) barcode scanners. The QR code always stays. */
+  barcode: boolean;
 }
 
-export const DEFAULT_LABEL_SETTINGS: LabelSettings = { qrContent: 'ASSET_ID', layout: 'A4_SHEET', labelWidthMm: 50, labelHeightMm: 25 };
+export const DEFAULT_LABEL_SETTINGS: LabelSettings = { qrContent: 'ASSET_ID', layout: 'A4_SHEET', labelWidthMm: 50, labelHeightMm: 25, barcode: true };
 
 /** The fixed text in front of the number for a given category code. */
 export function assetCodeHead(f: AssetIdFormat, categoryCode?: string | null) {

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { DEFAULT_ASSET_ID_FORMAT, DEFAULT_LABEL_SETTINGS, extractAssetCode } from '@/lib/asset-code';
+import { code128Values } from '@/lib/code128';
 import { PUT as putAssetIds } from '@/app/api/settings/asset-ids/route';
 import { GET as getQr } from '@/app/api/assets/[id]/qr/route';
 import { assetQr, labelsPdf } from '@/server/pdf';
@@ -85,6 +86,16 @@ describe('Asset ID format', () => {
 });
 
 describe('QR codes, labels and scanning', () => {
+  it('encodes the Asset ID as Code 128, switching to the compact digit set for long number runs', () => {
+    const v = code128Values('IT-LAP-00001');
+    expect(v[0]).toBe(104); // start B
+    expect(v.at(-1)).toBe(106); // stop
+    expect(v).toContain(99); // switch to set C for 00001's even part
+    const check = v.slice(0, -2).reduce((sum, x, k) => sum + x * (k === 0 ? 1 : k), 0) % 103;
+    expect(v.at(-2)).toBe(check);
+    expect(() => code128Values('Ä')).toThrow();
+  });
+
   it('reads both bare Asset IDs and scan links', () => {
     expect(extractAssetCode(' AST-000123 ')).toBe('AST-000123');
     expect(extractAssetCode('https://assets.example.com/scan/IT-LAP-00001')).toBe('IT-LAP-00001');
