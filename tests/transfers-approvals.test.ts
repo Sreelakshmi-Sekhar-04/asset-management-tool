@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { actorForUser, decide, savePolicy } from '@/server/services/approvals';
 import { assignAsset, bulkCheckIn, checkInAsset } from '@/server/services/lifecycle';
 import { createCategory } from '@/server/services/master';
-import { createTransfer, receive, resolveExceptions } from '@/server/services/transfers';
+import { createTransfer, receive, resolveExceptions, resolveIdentifiers } from '@/server/services/transfers';
 import { createUser } from '@/server/services/users';
 import { world, PASSWORD, type World } from './fixtures';
 import { rejectsWith } from './helpers';
@@ -15,6 +15,13 @@ type T = { transfer: { id: string; status: string }; pendingApproval?: { id: str
 const lines = (transferId: string) => prisma.transferLine.findMany({ where: { transferId }, orderBy: { assetCode: 'asc' } });
 
 describe('transfers', () => {
+  it('scanned label content (a scan link or a bare Asset ID) resolves to the asset; unknown codes are reported', async () => {
+    const a = await w.asset(w.A.id), b = await w.asset(w.A.id);
+    const r = await resolveIdentifiers(w.it.actor, `https://itam.example.com/scan/${encodeURIComponent(a.assetCode)}\n${b.assetCode.toLowerCase()}\nNOPE-404`, w.A.id);
+    expect(r.found.map((f) => f.id).sort()).toEqual([a.id, b.id].sort());
+    expect(r.unresolved).toEqual(['NOPE-404']);
+  });
+
   it('an IT-raised transfer is in transit at once, locks its assets, and moves them only on receipt', async () => {
     const a1 = await w.asset(w.A.id), a2 = await w.asset(w.A.id);
     const r = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'Rebalance', assetIds: [a1.id, a2.id] }) as T;

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ApprovalRequest, Asset, Prisma, Transfer, TransferLineStatus, TransferStatus } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
+import { extractAssetCode } from '@/lib/asset-code';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import { dateOnly, todayIST, fmtDateOnly } from '@/lib/format';
 import type { Actor } from '../actor';
@@ -35,7 +36,8 @@ export const transferInput = z.object({
 
 /** Resolve pasted / uploaded Asset IDs or serials. Returns found assets and the tokens that did not resolve. */
 export async function resolveIdentifiers(actor: Actor, text: string, fromLocationId?: string) {
-  const tokens = [...new Set(text.split(/[\s,;\t\r\n]+/).map((s) => s.trim()).filter(Boolean))].slice(0, 20_000);
+  // A label's QR may hold a scan link (…/scan/AST-000001); reduce each token to the identifier.
+  const tokens = [...new Set(text.split(/[\s,;\t\r\n]+/).map((s) => extractAssetCode(s)).filter(Boolean))].slice(0, 20_000);
   if (!tokens.length) return { found: [], unresolved: [], invalid: [] };
   const upper = tokens.map((t) => t.toUpperCase());
   const lower = tokens.map((t) => t.toLowerCase());
