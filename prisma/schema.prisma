@@ -322,6 +322,8 @@ model Department {
 model AssetCategory {
   id                 String   @id @default(cuid())
   name               String   @unique
+  /// Short code for the {CAT} token of the Asset ID format, e.g. LAP. Affects new assets only.
+  code               String?  @unique
   serialRequired     Boolean  @default(false)
   individuallyTracked Boolean @default(true)
   isSoftware         Boolean  @default(false)
@@ -436,7 +438,8 @@ model Employee {
 
 model Asset {
   id              String         @id @default(cuid())
-  /// AST-000001 — assigned by a database sequence default; immutable (DB trigger).
+  /// Issued on insert from the configured Asset ID format (default AST-000001) using
+  /// asset_code_seq; the column default is the fallback. Immutable (DB trigger).
   assetCode       String         @unique @default(dbgenerated("('AST-'::text || lpad((nextval('asset_code_seq'::regclass))::text, 6, '0'::text))"))
   categoryId      String
   category        AssetCategory  @relation(fields: [categoryId], references: [id])

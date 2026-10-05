@@ -12,6 +12,7 @@ import { createApprovalRequest, findPolicy } from './approvals';
 import { assertNotRetired, assertUnlocked, holderColumns, holderOf, recordMovement, switchAssignment, validateHolder, type HolderRef } from './movement';
 import { syncWarrantyRenewable } from './renewables';
 import { onManualAssetEdit } from './integrations';
+import { nextAssetCodes } from './asset-id';
 
 const optStr = (max = 200) => z.string().trim().max(max).nullable().optional().transform((v) => (v ? v : null));
 const optDate = z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Use YYYY-MM-DD').nullable().optional().or(z.literal('').transform(() => null));
@@ -103,11 +104,11 @@ async function flagDuplicates(db: Db, actor: Actor, assetId: string, warns: Dupl
 
 // ───────────── Create (FR-REG-01) ─────────────
 
-async function validateRefs(db: Db, data: { categoryId: string; serialNumber?: string | null; locationId?: string }, existingCategoryId?: string) {
+async function validateRefs(db: Db, data: { categoryId: string; serialNumber?: string | null; locationId?: string }, existingCategoryId?: string, opts: { checkSerial?: boolean } = {}) {
   const cat = await db.assetCategory.findUnique({ where: { id: data.categoryId } });
   if (!cat) throw badRequest('Category not found.', [{ field: 'categoryId', message: 'Unknown category' }]);
   if (!cat.active && cat.id !== existingCategoryId) throw badRequest(`Category "${cat.name}" is inactive and cannot be used for new assets.`);
-  if (cat.serialRequired && !data.serialNumber?.trim()) throw badRequest(`Serial number is required for category ${cat.name}.`, [{ field: 'serialNumber', message: `Required for ${cat.name}` }]);
+  if (opts.checkSerial !== false && cat.serialRequired && !data.serialNumber?.trim()) throw badRequest(`Serial number is required for category ${cat.name}.`, [{ field: 'serialNumber', message: `Required for ${cat.name}` }]);
   if (data.locationId) {
     const loc = await db.location.findUnique({ where: { id: data.locationId } });
     if (!loc || !loc.active) throw badRequest('Location not found or inactive.', [{ field: 'locationId', message: 'Unknown or inactive location' }]);
@@ -142,9 +143,10 @@ export async function insertAsset(t: Db, actor: Actor, data: z.infer<typeof crea
   const src = origin === 'manual' ? 'manual' : origin;
   const fieldSources: Record<string, string> = {};
   for (const k of ['make', 'model', 'serialNumber', 'hostname', 'ipAddress', 'macAddress', 'warrantyEnd']) if ((data as Record<string, unknown>)[k]) fieldSources[k] = src;
+  const [assetCode] = extra.assetCode ? [extra.assetCode] : await nextAssetCodes(t, [data.categoryId]);
   const asset = await t.asset.create({
     data: {
-      categoryId: data.categoryId, make: data.make, model: data.model, serialNumber: data.serialNumber, hostname: data.hostname,
+      assetCode, categoryId: data.categoryId, make: data.make, model: data.model, serialNumber: data.serialNumber, hostname: data.hostname,
       ipAddress: data.ipAddress, macAddress: data.macAddress, legacyTag: data.legacyTag,
       purchaseDate: data.purchaseDate ? dateOnly(data.purchaseDate) : null, purchaseCost: data.purchaseCost ?? null, vendor: data.vendor,
       warrantyEnd: data.warrantyEnd ? dateOnly(data.warrantyEnd) : null, condition: data.condition, remarks: data.remarks,
@@ -173,7 +175,8 @@ export async function bulkAddAssets(actor: Actor, input: unknown, opts: { skipAp
   if (actor.role === 'BRANCH_USER') throw forbidden();
   const data = bulkAddInput.parse(input);
   const run = async (t: Db) => {
-    const cat = await validateRefs(t, { categoryId: data.categoryId, locationId: data.locationId });
+    // Serials are checked per line below, so the shared check is skipped here.
+    const cat = await validateRefs(t, { categoryId: data.categoryId, locationId: data.locationId }, undefined, { checkSerial: false });
     const problems: { line: number; message: string }[] = [];
     const seen = new Map<string, number>();
     const allWarns: DuplicateHit[][] = [];
@@ -486,14 +489,29 @@ export async function getAssetDetail(actor: Actor, idOrCode: string) {
   };
 }
 
-/** FR-REG-11: global lookup by Asset ID (or exact serial / legacy tag). */
+/**
+ * FR-REG-11: global lookup by Asset ID, exact serial or legacy tag. Used by the header
+ * search and the scanner, so it also accepts the bare running number of an Asset ID
+ * ("123" finds AST-000123) when exactly one asset in scope ends with it.
+ * Out-of-scope assets are reported as not found, never disclosed.
+ */
 export async function lookupAsset(actor: Actor, term: string) {
   const s = term.trim();
   if (!s) throw badRequest('Enter an Asset ID.');
-  const a = await prisma.asset.findFirst({
-    where: { AND: [assetScope(actor), { OR: [{ assetCode: s.toUpperCase() }, { serialNormalized: s.toLowerCase() }, { legacyTagNormalized: s.toLowerCase() }] }] },
-    select: { id: true, assetCode: true },
-  });
-  if (!a) throw notFound('Asset');
-  return a;
+  const sel = { id: true, assetCode: true } as const;
+  const exact: [Prisma.AssetWhereInput, 'assetCode' | 'serial' | 'legacyTag'][] = [
+    [{ assetCode: s.toUpperCase() }, 'assetCode'],
+    [{ serialNormalized: s.toLowerCase() }, 'serial'],
+    [{ legacyTagNormalized: s.toLowerCase() }, 'legacyTag'],
+  ];
+  for (const [where, matchedBy] of exact) {
+    const a = await prisma.asset.findFirst({ where: { AND: [assetScope(actor), where] }, select: sel });
+    if (a) return { ...a, matchedBy };
+  }
+  if (/^\d{1,9}$/.test(s)) {
+    const ids = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM assets WHERE "assetCode" ~ ${`(^|[^0-9])0*${Number(s)}$`} LIMIT 50`;
+    const hits = ids.length ? await prisma.asset.findMany({ where: { AND: [assetScope(actor), { id: { in: ids.map((r) => r.id) } }] }, select: sel, take: 2 }) : [];
+    if (hits.length === 1) return { ...hits[0], matchedBy: 'number' as const };
+  }
+  throw notFound('Asset');
 }

@@ -1,4 +1,5 @@
 import { prisma, type Db } from '@/lib/db';
+import { DEFAULT_ASSET_ID_FORMAT, type AssetIdFormat } from '@/lib/asset-id';
 
 export type DuplicateSeverity = 'BLOCK' | 'WARN' | 'OFF';
 
@@ -21,6 +22,8 @@ export interface Settings {
   auditRetentionYears: number;
   importReportRetentionMonths: number;
   scannerAdvanceKey: 'Enter' | 'Tab';
+  /** Applies to assets created after the change; issued Asset IDs never change. */
+  assetIdFormat: AssetIdFormat;
   verificationReminderDays: number[];
   notificationEmail: Record<string, boolean>;
 }
@@ -49,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   auditRetentionYears: 7,
   importReportRetentionMonths: 12,
   scannerAdvanceKey: 'Enter',
+  assetIdFormat: DEFAULT_ASSET_ID_FORMAT,
   verificationReminderDays: [7, 1],
   notificationEmail: {
     TRANSFER_APPROVAL_REQUESTED: true, TRANSFER_DECIDED: true, TRANSFER_IN_TRANSIT: true, TRANSFER_EXCEPTION: true,
@@ -65,6 +69,7 @@ export async function getSettings(db: Db = prisma): Promise<Settings> {
   const merged: Record<string, unknown> = { ...DEFAULT_SETTINGS };
   for (const r of rows) merged[r.key] = r.value;
   merged.duplicateRules = { ...DEFAULT_SETTINGS.duplicateRules, ...(merged.duplicateRules as object) };
+  merged.assetIdFormat = { ...DEFAULT_SETTINGS.assetIdFormat, ...(merged.assetIdFormat as object) };
   merged.notificationEmail = { ...DEFAULT_SETTINGS.notificationEmail, ...(merged.notificationEmail as object) };
   const value = merged as unknown as Settings;
   cache = { at: Date.now(), value };

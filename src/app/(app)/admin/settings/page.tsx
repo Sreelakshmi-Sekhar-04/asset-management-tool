@@ -1,5 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ASSET_ID_TOKENS, DEFAULT_ASSET_ID_FORMAT, formatAssetId, validateAssetIdFormat, type AssetIdFormat } from '@/lib/asset-id';
 import { api, useApi } from '@/components/api';
 import { Card, ErrorBox, Field, PageHeader, Spinner, useToast } from '@/components/ui';
 
@@ -43,6 +45,7 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Organisation-wide rules. Every change is recorded in the audit log." actions={<button className="btn btn-primary" disabled={busy} onClick={save}>{busy && <Spinner className="h-3 w-3" />}Save</button>} />
       <ErrorBox error={err} />
       <Card title="Organisation"><Field label="Organisation name"><input className="input" value={s.orgName} onChange={(e) => setS({ ...s, orgName: e.target.value })} /></Field></Card>
+      <AssetIdFormatCard />
       <Card title="Sign-in and sessions">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Idle timeout (minutes)"><input {...num('sessionIdleMinutes')} min={5} max={480} /></Field>
@@ -83,5 +86,93 @@ export default function SettingsPage() {
         ))}</div>
       </Card>
     </div>
+  );
+}
+
+interface IdConfig { format: AssetIdFormat; nextNumber: number; year: number; issued: number; categories: { id: string; name: string; code: string | null; effectiveCode: string }[] }
+
+/** Asset ID format: saved separately from the other settings because it has its own rules and preview. */
+function AssetIdFormatCard() {
+  const toast = useToast();
+  const { data, error, reload } = useApi<IdConfig>('/api/settings/asset-id');
+  const [f, setF] = useState<AssetIdFormat>(DEFAULT_ASSET_ID_FORMAT);
+  const [next, setNext] = useState('');
+  const [err, setErr] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const patternRef = useRef<HTMLInputElement>(null);
+  // Where to put the caret back once an inserted token has rendered.
+  const restoreCaret = useRef<number | null>(null);
+  useEffect(() => { if (data) { setF(data.format); setNext(String(data.nextNumber)); } }, [data]);
+  useLayoutEffect(() => {
+    const el = patternRef.current, at = restoreCaret.current;
+    if (el && at !== null) { el.focus(); el.setSelectionRange(at, at); restoreCaret.current = null; }
+  }, [f.pattern]);
+  if (error) return <ErrorBox error={error} />;
+  if (!data) return <Card title="Asset ID format"><Spinner /></Card>;
+
+  const problems = validateAssetIdFormat(f);
+  const problem = (k: string) => problems.find((p) => p.field === k)?.message;
+  const nextN = Number(next);
+  const nextErr = !Number.isInteger(nextN) || nextN < data.nextNumber ? `At least ${data.nextNumber}; numbers already issued are never reused.` : null;
+  const seq = nextErr ? data.nextNumber : nextN;
+  const sample = (cat: string, add = 0) => formatAssetId(f, { seq: seq + add, cat, year: data.year });
+  const usesCat = f.pattern.includes('{CAT}');
+  const cats = data.categories;
+  const withoutCode = cats.filter((c) => !c.code);
+  const dirty = JSON.stringify(f) !== JSON.stringify(data.format) || nextN !== data.nextNumber;
+  const insert = (token: string) => {
+    // The field keeps its selection after losing focus to the button, so insert at the caret.
+    const el = patternRef.current;
+    const at = el?.selectionStart ?? f.pattern.length, end = el?.selectionEnd ?? at;
+    restoreCaret.current = at + token.length;
+    setF({ ...f, pattern: f.pattern.slice(0, at) + token + f.pattern.slice(end) });
+  };
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await api('/api/settings/asset-id', { method: 'PUT', body: { ...f, ...(nextN !== data.nextNumber ? { nextNumber: nextN } : {}) } });
+      toast('Asset ID format saved. New assets use it from now on.'); reload();
+    } catch (e) { setErr(e); } finally { setBusy(false); }
+  };
+
+  return (
+    <Card title="Asset ID format" actions={<>
+      {dirty && <button className="btn btn-sm" onClick={() => { setF(data.format); setNext(String(data.nextNumber)); setErr(null); }}>Discard</button>}
+      <button className="btn btn-sm btn-primary" disabled={busy || !dirty || problems.length > 0 || !!nextErr} onClick={save}>{busy && <Spinner className="h-3 w-3" />}Save format</button>
+    </>}>
+      <p className="mb-3 text-sm text-slate-600">The system issues the Asset ID when an asset is registered, bulk-added, imported or created from an integration. It is printed on the QR label and never changes. A new format applies to new assets only; the {data.issued.toLocaleString('en-IN')} existing Asset IDs and their labels stay as they are.</p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field label="Prefix" error={problem('prefix')} hint="Replaces {PREFIX}, e.g. IT or your company initials.">
+          <input className="input font-mono uppercase" value={f.prefix} maxLength={8} onChange={(e) => setF({ ...f, prefix: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })} />
+        </Field>
+        <Field label="Number digits" error={problem('padding')} hint="{SEQ} is zero-padded to this width.">
+          <input className="input" type="number" min={3} max={9} value={f.padding} onChange={(e) => setF({ ...f, padding: Number(e.target.value) })} />
+        </Field>
+        <Field label="Next number" error={nextErr} hint="Can be moved forward, never back.">
+          <input className="input" type="number" min={data.nextNumber} value={next} onChange={(e) => setNext(e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Pattern" className="mt-3" error={problem('pattern')} hint={<>Click a part to insert it. {'{SEQ}'} is required; separators can be - _ / or .</>}>
+        <input ref={patternRef} className="input font-mono" value={f.pattern} maxLength={40} onChange={(e) => setF({ ...f, pattern: e.target.value })} />
+      </Field>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {ASSET_ID_TOKENS.map((t) => <button key={t.token} type="button" className="btn btn-sm" onClick={() => insert(t.token)} title={t.label}><span className="font-mono">{t.token}</span><span className="text-slate-500">{t.label}</span></button>)}
+        <button type="button" className="btn btn-sm btn-ghost" onClick={() => setF(DEFAULT_ASSET_ID_FORMAT)}>Use default (AST-000001)</button>
+      </div>
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="text-xs font-medium text-slate-500">Next Asset ID</div>
+        <div className="mt-0.5 break-all font-mono text-lg font-semibold">{problems.length ? '—' : sample(cats[0]?.effectiveCode ?? 'LAP')}</div>
+        {!problems.length && usesCat && cats.length > 1 && (
+          <ul className="mt-2 grid gap-x-4 gap-y-0.5 text-xs text-slate-600 sm:grid-cols-2">
+            {cats.slice(0, 6).map((c, i) => <li key={c.id}>{c.name}: <span className="font-mono">{sample(c.effectiveCode, i)}</span></li>)}
+          </ul>
+        )}
+        {!problems.length && !usesCat && <div className="mt-1 text-xs text-slate-500">Then <span className="font-mono">{sample('', 1)}</span>, <span className="font-mono">{sample('', 2)}</span>, …</div>}
+      </div>
+      {usesCat && withoutCode.length > 0 && (
+        <p className="mt-2 text-xs text-amber-700">{withoutCode.length} categor{withoutCode.length === 1 ? 'y has' : 'ies have'} no code, so the first letters of the name are used ({withoutCode.slice(0, 3).map((c) => `${c.name} → ${c.effectiveCode}`).join(', ')}{withoutCode.length > 3 ? ', …' : ''}). Set codes under <Link href="/admin/master-data">Categories &amp; departments</Link>.</p>
+      )}
+      <ErrorBox error={err} className="mt-3" />
+    </Card>
   );
 }

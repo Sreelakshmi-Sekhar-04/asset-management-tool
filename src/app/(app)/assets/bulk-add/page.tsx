@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/components/api';
+import { LabelPrintDialog } from '@/components/label-print';
 import { CategorySelect, LocationSelect, useCategories } from '@/components/pickers';
 import { useScannerAdvance } from '@/components/scanner';
 import { Card, ErrorBox, Field, PageHeader, Spinner, useToast } from '@/components/ui';
@@ -14,6 +15,7 @@ export default function BulkAdd() {
   const [qty, setQty] = useState(5);
   const [items, setItems] = useState<{ serialNumber: string; hostname: string }[]>([]);
   const [err, setErr] = useState<unknown>(null);
+  const [printing, setPrinting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ assetCode: string; id: string; serialNumber: string | null }[] | null>(null);
   const cat = cats?.find((c) => c.id === f.categoryId);
@@ -69,8 +71,9 @@ export default function BulkAdd() {
         </form>
       )}
       {done && (
-        <Card title={`Created ${done.length} assets`}>
+        <Card title={`Created ${done.length} assets`} actions={<button className="btn btn-sm btn-primary" onClick={() => setPrinting(true)}>Print {done.length} labels</button>}>
           <ul className="grid gap-1 text-sm sm:grid-cols-3">{done.map((d) => <li key={d.id}><Link href={`/assets/${d.id}`}>{d.assetCode}</Link> <span className="text-slate-500">{d.serialNumber}</span></li>)}</ul>
+          <LabelPrintDialog open={printing} onClose={() => setPrinting(false)} assetIds={done.map((d) => d.id)} />
         </Card>
       )}
     </div>

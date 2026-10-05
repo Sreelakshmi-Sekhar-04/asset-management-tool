@@ -2,9 +2,10 @@
 import { useState } from 'react';
 import { api, useApi } from '@/components/api';
 import type { Cat, Dept } from '@/components/pickers';
+import { categoryCode } from '@/lib/asset-id';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
-type CatForm = { name: string; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean };
+type CatForm = { name: string; code: string; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean };
 
 export default function MasterDataPage() {
   const toast = useToast();
@@ -19,17 +20,19 @@ export default function MasterDataPage() {
     <div className="space-y-4">
       <PageHeader title="Categories and departments" subtitle="Values used in forms and imports. Values in use can be deactivated but not deleted, so history stays intact." />
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Asset categories" actions={<button className="btn btn-sm btn-primary" onClick={() => setCat({ f: { name: '', serialRequired: true, individuallyTracked: true, isSoftware: false } })}>Add</button>} bodyClass="p-0">
+        <Card title="Asset categories" actions={<button className="btn btn-sm btn-primary" onClick={() => setCat({ f: { name: '', code: '', serialRequired: true, individuallyTracked: true, isSoftware: false } })}>Add</button>} bodyClass="p-0">
           <ErrorBox error={cats.error} />
           <div className="table-wrap"><table className="tbl">
             <thead><tr><th>Name</th><th>Rules</th><th>Assets</th><th /></tr></thead>
             <tbody>{(cats.data ?? []).map((c) => (
               <tr key={c.id} className={c.active ? '' : 'text-slate-400'}>
-                <td>{c.name} {!c.active && <Badge>Inactive</Badge>}</td>
+                <td>{c.name} {!c.active && <Badge>Inactive</Badge>}
+                  <span className={c.code ? 'block font-mono text-xs text-slate-600' : 'block font-mono text-xs text-slate-400'} title={c.code ? 'Code used in Asset IDs' : 'No code set: these letters from the name are used in Asset IDs'}>{categoryCode(c)}</span>
+                </td>
                 <td className="text-xs">{[c.serialRequired && 'serial required', c.individuallyTracked ? 'individually tracked' : 'bulk', c.isSoftware && 'software'].filter(Boolean).join(', ')}</td>
                 <td>{c.assetCount}</td>
                 <td className="whitespace-nowrap text-right">
-                  <button className="btn btn-sm btn-ghost" onClick={() => setCat({ id: c.id, f: { name: c.name, serialRequired: c.serialRequired, individuallyTracked: c.individuallyTracked, isSoftware: c.isSoftware } })}>Edit</button>
+                  <button className="btn btn-sm btn-ghost" onClick={() => setCat({ id: c.id, f: { name: c.name, code: c.code ?? '', serialRequired: c.serialRequired, individuallyTracked: c.individuallyTracked, isSoftware: c.isSoftware } })}>Edit</button>
                   <button className="btn btn-sm btn-ghost" onClick={() => toggle('categories', c.id, !c.active)}>{c.active ? 'Deactivate' : 'Activate'}</button>
                 </td>
               </tr>
@@ -56,6 +59,9 @@ export default function MasterDataPage() {
         onSubmit={async () => { if (cat!.id) await api(`/api/categories/${cat!.id}`, { method: 'PATCH', body: cat!.f }); else await api('/api/categories', { body: cat!.f }); toast('Saved'); cats.reload(); }}>
         {cat && <>
           <Field label="Name" required><input className="input" value={cat.f.name} onChange={(e) => setCat({ ...cat, f: { ...cat.f, name: e.target.value } })} required /></Field>
+          <Field label="Code" hint={<>Up to 6 letters or digits, e.g. LAP. Used by the {'{CAT}'} part of the Asset ID format (Settings). Changing it affects new assets only.</>}>
+            <input className="input w-32 font-mono uppercase" value={cat.f.code} maxLength={6} pattern="[A-Za-z0-9]{1,6}" placeholder={categoryCode({ name: cat.f.name || 'GEN' })} onChange={(e) => setCat({ ...cat, f: { ...cat.f, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') } })} />
+          </Field>
           {([['serialRequired', 'Serial number required'], ['individuallyTracked', 'Tracked individually (one record per item)'], ['isSoftware', 'Software / licence category']] as const).map(([k, l]) => (
             <label key={k} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={cat.f[k]} onChange={(e) => setCat({ ...cat, f: { ...cat.f, [k]: e.target.checked } })} />{l}</label>
           ))}

@@ -28,6 +28,7 @@ These hold even if application code is bypassed. They are in `20260930000001_con
 | Rule | Mechanism |
 |---|---|
 | Asset ID can never change (AC-01, TC-REG-03) | `assets_guard_update` trigger raises `ASSET_ID_IMMUTABLE` |
+| Asset ID running numbers are never reused | All Asset IDs draw from `asset_code_seq`, whatever the configured format; the next number can only be moved forward (`setval`) |
 | A retired asset cannot be moved, assigned or edited (remarks excepted) | same trigger raises `ASSET_RETIRED` |
 | Assets are never deleted | `assets_no_delete` trigger |
 | Transfer numbers never change | `transfers_guard_no` trigger |
@@ -53,6 +54,7 @@ Besides the foreign-key and unique indexes, there are indexes on the columns lis
 | `20260930000001_constraints` | Triggers, CHECK constraints, partial unique index, trigram search indexes |
 | `20260930000002_verification_line_asset_fk` | Foreign key from verification lines to assets |
 | `20260930000003_import_report_purge` | `import_jobs.reportPurgedAt` for the import-report retention purge |
+| `20261005000000_category_code` | Optional unique `asset_categories.code` for the `{CAT}` part of the Asset ID format |
 
 To add one during development: edit `schema.prisma`, then run `npm run db:migrate:dev -- --name <what_changed>` and commit the new folder.
 

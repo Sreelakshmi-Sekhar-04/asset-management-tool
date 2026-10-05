@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { patchOf } from '@/lib/zod';
-import { prisma, tx } from '@/lib/db';
+import { prisma, tx, type Db } from '@/lib/db';
 import { conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit, diff } from '../audit';
@@ -9,6 +9,10 @@ import { getSettings, invalidateSettings, DEFAULT_SETTINGS, type Settings } from
 // ── Categories (FR-CFG-02) ──
 export const categoryInput = z.object({
   name: z.string().trim().min(1).max(80),
+  /** Short code for the {CAT} token of the Asset ID format. Changing it affects new assets only. */
+  code: z.string().trim().toUpperCase().nullable().optional()
+    .transform((v) => v || null)
+    .refine((v) => v === null || /^[A-Z0-9]{1,6}$/.test(v), 'Use 1–6 capital letters or digits'),
   serialRequired: z.boolean().default(false),
   individuallyTracked: z.boolean().default(true),
   isSoftware: z.boolean().default(false),
@@ -22,10 +26,17 @@ export async function listCategories(includeInactive = false) {
   return rows.map((r) => ({ ...r, assetCount: m.get(r.id) ?? 0 }));
 }
 
+async function assertCodeFree(t: Db, code: string | null | undefined) {
+  if (!code) return;
+  const other = await t.assetCategory.findFirst({ where: { code }, select: { name: true } });
+  if (other) throw conflict(`Code ${code} is already used by category "${other.name}".`, [{ field: 'code', message: 'Already in use' }]);
+}
+
 export async function createCategory(actor: Actor, input: unknown) {
   const data = categoryInput.parse(input);
   return tx(async (t) => {
     if (await t.assetCategory.findFirst({ where: { name: { equals: data.name, mode: 'insensitive' } } })) throw conflict(`Category "${data.name}" already exists.`);
+    await assertCodeFree(t, data.code);
     const c = await t.assetCategory.create({ data: { ...data, active: data.active ?? true } });
     await audit(t, actor, { action: 'CATEGORY_CREATED', entityType: 'Category', entityId: c.id, entityLabel: c.name, after: c });
     return c;
@@ -39,6 +50,7 @@ export async function updateCategory(actor: Actor, id: string, input: unknown) {
     if (!c) throw notFound('Category');
     if (data.name && data.name.toLowerCase() !== c.name.toLowerCase() && (await t.assetCategory.findFirst({ where: { name: { equals: data.name, mode: 'insensitive' } } })))
       throw conflict(`Category "${data.name}" already exists.`);
+    if (data.code && data.code !== c.code) await assertCodeFree(t, data.code);
     const u = await t.assetCategory.update({ where: { id }, data });
     const d = diff(c as unknown as Record<string, unknown>, data as Record<string, unknown>);
     await audit(t, actor, { action: data.active === false ? 'CATEGORY_DEACTIVATED' : 'CATEGORY_UPDATED', entityType: 'Category', entityId: id, entityLabel: u.name, before: d.before, after: d.after });

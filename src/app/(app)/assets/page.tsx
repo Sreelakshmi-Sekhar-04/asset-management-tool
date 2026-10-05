@@ -9,6 +9,7 @@ import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { AssetStatus, Flags } from '@/components/badges';
 import { DataTable, emptySelection, FilterSelect, SavedFilters, SearchBox, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
+import { LabelPrintDialog } from '@/components/label-print';
 import { CategorySelect, LocationSelect } from '@/components/pickers';
 import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
@@ -28,6 +29,7 @@ export default function AssetRegister() {
   const [reason, setReason] = useState('');
   const [disposal, setDisposal] = useState('SCRAPPED');
   const [busyExport, setBusyExport] = useState(false);
+  const [labelIds, setLabelIds] = useState<string[] | null>(null);
   const total = data?.total ?? 0;
   const count = selectionCount(sel, total);
   const selPayload = () => (sel.mode === 'ids' ? { assetIds: [...sel.ids] } : { filter: assetFiltersFromQuery(ls.query), excludeIds: [...sel.exclude] });
@@ -53,9 +55,9 @@ export default function AssetRegister() {
     sessionStorage.setItem('transfer-selection', JSON.stringify({ ...selPayload(), count }));
     router.push('/transfers/new?from=selection');
   };
-  const labels = async () => {
+  const labels = () => {
     if (sel.mode !== 'ids') { toast('Labels are generated for explicitly selected assets (up to 2,000).', 'err'); return; }
-    try { await download('/api/assets/labels', { assetIds: [...sel.ids] }); } catch (e) { toast((e as Error).message, 'err'); }
+    setLabelIds([...sel.ids]);
   };
   const runBulk = async () => {
     if (bulk === 'CHECK_IN') {
@@ -103,6 +105,7 @@ export default function AssetRegister() {
       <DataTable columns={cols} rows={data?.rows ?? []} total={total} loading={loading} page={ls.page} pageSize={ls.pageSize} sort={ls.sort} dir={ls.dir}
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} onSort={(k, d) => ls.setMany({ sort: k, dir: d })}
         selection={sel} onSelection={setSel} empty="No assets match these filters." />
+      <LabelPrintDialog open={!!labelIds} onClose={() => setLabelIds(null)} assetIds={labelIds ?? []} />
       <FormModal open={!!bulk} onClose={() => setBulk('')} danger={bulk === 'RETIRE'}
         title={{ REPAIR: 'Send to repair', REPAIR_DONE: 'Complete repair', RETIRE: 'Retire assets', CHECK_IN: 'Check in', '': '' }[bulk]}
         submitLabel={`Apply to ${count}`}

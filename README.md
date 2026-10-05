@@ -9,7 +9,7 @@ This repository implements **Phase 1 only** (cuts A, B and R1 of the FRD). Procu
 | Area | Highlights |
 |---|---|
 | Access | Three roles (Administrator, IT Operator, Branch User). Branch users see only their location subtree, enforced on the server for every read, write, report and export. Password policy, lockout, idle and absolute session timeouts, reset by email. |
-| Register | System-issued Asset IDs that the database refuses to change. Serial and legacy-tag duplicates block; hostname and IP duplicates warn and need a reason. Bulk add by model × quantity, scanner-friendly entry and QR labels. |
+| Register | System-issued Asset IDs in an administrator-configured format (default `AST-000001`) that the database refuses to change. Serial and legacy-tag duplicates block; hostname and IP duplicates warn and need a reason. Bulk add by model × quantity, scanner-friendly entry, QR labels (A4 sheet or thermal 50 × 25 mm) and a camera / USB scanner that opens the asset. |
 | Lifecycle | Assign, check-in, repair and retire, single or in bulk (all-or-nothing), each optionally approval-gated. |
 | Transfers | Branch-to-branch with mandatory reason. Assets are locked while in flight. Receipt is per line with partial receipt, exceptions, re-send, write-off, recall, aging alerts and late recording. |
 | Approvals | Configurable policies by category, cost, bulk size, inter-state and initiator role, with sequential or parallel steps. The requester cannot approve their own request. |

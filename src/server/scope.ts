@@ -53,7 +53,8 @@ export async function scopedLocationIds(actor: Actor, db: Db = prisma): Promise<
 
 /** Load an asset the actor may see, or 404 (never disclosing out-of-scope records). */
 export async function getScopedAsset(actor: Actor, idOrCode: string, db: Db = prisma) {
-  const where: Prisma.AssetWhereInput = /^AST-\d+$/i.test(idOrCode) ? { assetCode: idOrCode.toUpperCase() } : { id: idOrCode };
+  // Asset IDs follow a configurable format, so match either the internal id or the Asset ID.
+  const where: Prisma.AssetWhereInput = { OR: [{ id: idOrCode }, { assetCode: idOrCode.trim().toUpperCase() }] };
   const asset = await db.asset.findFirst({ where: { AND: [where, assetScope(actor)] } });
   if (!asset) throw notFound('Asset');
   return asset;

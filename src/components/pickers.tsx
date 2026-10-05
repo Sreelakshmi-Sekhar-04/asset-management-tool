@@ -4,7 +4,7 @@ import { api, qs, useApi } from './api';
 import clsx from 'clsx';
 
 export interface Loc { id: string; name: string; namePath: string; type: string; depth: number; active: boolean; assetCount: number; effectiveState: string | null; parentId: string | null; code: string | null; state: string | null; email: string | null }
-export interface Cat { id: string; name: string; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean; active: boolean; assetCount: number }
+export interface Cat { id: string; name: string; code: string | null; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean; active: boolean; assetCount: number }
 export interface Dept { id: string; name: string; active: boolean }
 
 export const useLocations = (includeInactive = false, all = false) => useApi<Loc[]>(`/api/locations${includeInactive || all ? '?' : ''}${includeInactive ? 'includeInactive=true&' : ''}${all ? 'all=true' : ''}`);

@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '@/components/api';
 import { AssetFields, DuplicateNotice, emptyAsset, toPayload, type AssetFormValues } from '@/components/asset-form';
 import { Card, PageHeader, Spinner, useToast } from '@/components/ui';
@@ -12,6 +12,11 @@ export default function NewAsset() {
   const [err, setErr] = useState<unknown>(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  // Arriving from the scanner with an unregistered barcode: start with it as the serial number.
+  useEffect(() => {
+    const serial = new URLSearchParams(window.location.search).get('serial')?.trim();
+    if (serial) setV((x) => ({ ...x, serialNumber: serial.slice(0, 120) }));
+  }, []);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setErr(null);

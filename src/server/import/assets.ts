@@ -7,6 +7,7 @@ import type { Actor } from '../actor';
 import { auditMany } from '../audit';
 import { getSettings } from '../settings';
 import { syncWarrantyRenewable } from '../services/renewables';
+import { nextAssetCodes } from '../services/asset-id';
 import type { ParsedRow } from './parse';
 import { parseDate } from './parse';
 import { LocationResolver, type ImportContext, type RowResult, type ValidationResult } from './common';
@@ -188,6 +189,8 @@ export async function applyAssets(t: Db, actor: Actor, jobId: string, v: Validat
         flagDuplicateSuspect: p.warnings.length > 0, createdById: actorId, updatedById: actorId,
       };
     });
+    const issued = await nextAssetCodes(t, rowsData.map((x) => x.categoryId));
+    rowsData.forEach((x, k) => { x.assetCode = issued[k]; });
     await t.asset.createMany({ data: rowsData });
     const codes = new Map((await t.asset.findMany({ where: { id: { in: rowsData.map((x) => x.id!) } }, select: { id: true, assetCode: true } })).map((a) => [a.id, a.assetCode]));
     const movements: Prisma.AssetMovementCreateManyInput[] = [];

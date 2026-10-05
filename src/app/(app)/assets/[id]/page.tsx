@@ -1,13 +1,14 @@
 'use client';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { daysBetween, fmtDateOnly, fmtDateTime, fmtINR, todayIST, dateOnly } from '@/lib/format';
 import { HOLDER_TYPE_LABEL, label, RENEWABLE_TYPE_LABEL, STATUS_LABEL } from '@/lib/labels';
-import { api, download, useApi } from '@/components/api';
+import { api, useApi } from '@/components/api';
 import { AssetFields, DuplicateNotice, toPayload, type AssetFormValues } from '@/components/asset-form';
 import { AssetStatus, DaysBadge, Flags } from '@/components/badges';
 import { DocumentsPanel } from '@/components/documents';
+import { LabelPrintDialog } from '@/components/label-print';
 import { useMe } from '@/components/me';
 import { HolderPicker, LocationSelect, type HolderValue } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, Modal, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
@@ -26,7 +27,7 @@ interface Detail {
 }
 interface TL { at: string; effectiveAt?: string | null; kind: string; title: string; actor: string | null; details: string[]; ref?: { type: string; id: string; label: string } }
 
-type Dialog = '' | 'edit' | 'assign' | 'checkin' | 'repair' | 'repairdone' | 'retire' | 'correct' | 'clear';
+type Dialog = '' | 'edit' | 'assign' | 'checkin' | 'repair' | 'repairdone' | 'retire' | 'correct' | 'clear' | 'label';
 
 export default function AssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +36,15 @@ export default function AssetDetail() {
   const { data: a, error, reload } = useApi<Detail>(`/api/assets/${id}`);
   const [tab, setTab] = useState('overview');
   const [dlg, setDlg] = useState<Dialog>('');
+  // Deep link from the scanner: /assets/<id>?action=assign opens that dialog once the asset has loaded.
+  const loaded = !!a;
+  useEffect(() => {
+    if (!loaded) return;
+    const p = new URLSearchParams(window.location.search);
+    const act = p.get('action');
+    if (act && ['assign', 'checkin', 'repair', 'repairdone', 'retire', 'label'].includes(act)) setDlg(act as Dialog);
+    if (act) { p.delete('action'); window.history.replaceState(null, '', `${window.location.pathname}${p.size ? `?${p}` : ''}`); }
+  }, [loaded]);
   if (error) return <ErrorBox error={error} />;
   if (!a) return <div className="flex justify-center py-20"><Spinner /></div>;
   const retired = a.status === 'RETIRED';
@@ -57,7 +67,7 @@ export default function AssetDetail() {
           {me.isIT && !locked && a.status === 'UNDER_REPAIR' && <button className="btn" onClick={() => setDlg('repairdone')}>Repair done</button>}
           {me.isIT && !locked && a.status === 'IN_STOCK' && <button className="btn" onClick={() => setDlg('retire')}>Retire</button>}
           {!retired && !locked && <Link className="btn" href={`/transfers/new?assetId=${a.id}&from=${a.locationId}`}>Transfer</Link>}
-          <button className="btn" onClick={() => download('/api/assets/labels', { assetIds: [a.id] }).catch((e) => toast(e.message, 'err'))}>Label</button>
+          <button className="btn" onClick={() => setDlg('label')}>Print label</button>
           {me.isAdmin && !retired && !locked && <button className="btn" onClick={() => setDlg('correct')}>Correct location / holder</button>}
           {me.isIT && a.flags.length > 0 && <button className="btn" onClick={() => setDlg('clear')}>Clear flag</button>}
         </>} />
@@ -79,7 +89,8 @@ export default function AssetDetail() {
             </dl>
           </Card>
           <Card title="Identification">
-            <dl className="kv">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start lg:flex-col xl:flex-row">
+            <dl className="kv flex-1">
               <dt>Asset ID</dt><dd className="font-mono">{a.assetCode}</dd>
               <dt>Legacy tag</dt><dd>{a.legacyTag ?? '—'}</dd>
               <dt>Serial</dt><dd>{a.serialNumber ?? '—'}{a.raw.fieldSources.serialNumber && a.raw.fieldSources.serialNumber !== 'manual' ? <Badge tone="teal">{a.raw.fieldSources.serialNumber}</Badge> : null}</dd>
@@ -90,6 +101,16 @@ export default function AssetDetail() {
                 </Fragment>
               ))}
             </dl>
+            <figure className="flex shrink-0 flex-col items-center gap-1 self-center sm:self-start lg:self-center xl:self-start">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/assets/${a.id}/qr`} alt={`QR code for ${a.assetCode}`} width={112} height={112} className="h-28 w-28 rounded border border-slate-200 bg-white p-1" />
+              <figcaption className="font-mono text-xs font-semibold">{a.assetCode}</figcaption>
+              <div className="flex gap-1">
+                <button className="btn btn-sm btn-ghost" onClick={() => setDlg('label')}>Print</button>
+                <a className="btn btn-sm btn-ghost" href={`/api/assets/${a.id}/qr`} download>Download</a>
+              </div>
+            </figure>
+            </div>
           </Card>
           <Card title="Purchase and warranty">
             <dl className="kv">
@@ -159,6 +180,7 @@ export default function AssetDetail() {
       <SimpleDialog open={dlg === 'repairdone'} onClose={() => setDlg('')} title={`Complete repair of ${a.assetCode}`} submitLabel="Repair done" fields={[{ k: 'condition', label: 'Condition' }, { k: 'remarks', label: 'Remarks', area: true }]} path={`/api/assets/${a.id}/repair-done`} onDone={done('Repair completed')} />
       <RetireDialog open={dlg === 'retire'} onClose={() => setDlg('')} a={a} onDone={done('Retired')} />
       <CorrectDialog open={dlg === 'correct'} onClose={() => setDlg('')} a={a} onDone={done('Corrected')} />
+      <LabelPrintDialog open={dlg === 'label'} onClose={() => setDlg('')} assetIds={[a.id]} title={`Print label for ${a.assetCode}`} />
       <ClearFlagDialog open={dlg === 'clear'} onClose={() => setDlg('')} a={a} onDone={done('Flag cleared')} />
     </div>
   );

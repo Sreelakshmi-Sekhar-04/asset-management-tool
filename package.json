@@ -2,7 +2,7 @@
   "name": "itam",
   "version": "1.0.0",
   "private": true,
-  "description": "IT Asset Lifecycle Management \u2014 Phase 1",
+  "description": "IT Asset Lifecycle Management — Phase 1",
   "scripts": {
     "dev": "concurrently -k -n web,worker \"next dev -p 3000\" \"tsx watch src/worker/main.ts\"",
     "build": "prisma generate && next build",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "barcode-detector": "^3.2.2",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "csv-parse": "^7.0.3",
