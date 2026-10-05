@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@zxing/library": "^0.21.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "csv-parse": "^7.0.3",

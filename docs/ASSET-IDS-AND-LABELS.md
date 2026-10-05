@@ -17,7 +17,7 @@ How an asset gets its identity and how that identity travels from the register t
 
 With the defaults the format is the FRD's `AST-000001`. Examples: `IT-LAP-00001` (prefix IT, category code LAP, 5 digits, separate numbering), `AST000123` (no separator).
 
-Guarantees, all enforced in PostgreSQL so every path (form, bulk add, import, approvals, verification finds, raw SQL) behaves the same:
+Guarantees, all enforced in PostgreSQL so every path (form, scan to register, bulk add, import, approvals, verification finds, raw SQL) behaves the same:
 
 - The `assets_assign_code` trigger assigns the Asset ID on insert from the saved format and ignores any value a caller sends.
 - IDs stay unique: the number comes from `asset_code_seq` or a locked row in `asset_code_counters`; a new per-prefix counter starts above the highest number already used under that prefix; a number whose ID already exists is skipped.

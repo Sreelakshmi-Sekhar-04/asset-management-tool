@@ -72,7 +72,7 @@ export default function AssetRegister() {
     <div>
       <PageHeader title="Asset register" subtitle={me.isBranch ? `Assets at ${me.scopeName}` : undefined}
         actions={<>
-          {me.isIT && <Link href="/assets/new" className="btn btn-primary">Register asset</Link>}
+          {me.isIT && <><Link href="/assets/new" className="btn btn-primary">Register asset</Link><Link href="/assets/add" className="btn">Other ways to add</Link></>}
           <button className="btn" disabled={busyExport} onClick={() => exportView('csv')}>Export CSV</button>
           <button className="btn" disabled={busyExport} onClick={() => exportView('xlsx')}>Export Excel</button>
         </>} />

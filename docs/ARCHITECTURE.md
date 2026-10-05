@@ -90,7 +90,7 @@ The FRD was followed wherever it is specific. Where it was silent or ambiguous, 
 4. A bulk action creates **one** approval request covering all its assets. Bulk check-in and bulk reassign (offboarding) go through the same policies as single actions.
 5. If an approver of type "manager of the holder" cannot be resolved (no holder, no manager, or the manager has no active account), the step falls back to Administrators.
 6. Administrators may approve their own requests. No one else can (FR-TRF-03).
-7. **(confirm)** Asset-create policies apply to manual create and bulk add. Imports, integration auto-create and verification unlisted finds do **not** go through asset-create policies. Imports are IT-only with a mandatory dry run and confirmation. Auto-create is an Administrator opt-in per source. Unlisted finds are already an IT review decision.
+7. **(confirm)** Asset-create policies apply to manual create, scan to register and bulk add. Imports, integration auto-create and verification unlisted finds do **not** go through asset-create policies. Imports are IT-only with a mandatory dry run and confirmation. Auto-create is an Administrator opt-in per source. Unlisted finds are already an IT review decision.
 
 **Transfers**
 8. Drafts do not lock assets. The lock starts at submission.
