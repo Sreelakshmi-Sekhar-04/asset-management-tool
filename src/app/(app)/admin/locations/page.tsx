@@ -4,7 +4,8 @@ import { api } from '@/components/api';
 import { LocationSelect, useLocations, type Loc } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useConfirm, useToast } from '@/components/ui';
 
-const TYPES = ['REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER'];
+// A top-level location is an organization (head quarter); everything else sits under one.
+const TYPES = ['ORGANIZATION', 'REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER'];
 type Form = { name: string; type: string; parentId: string; state: string; code: string; email: string };
 
 export default function LocationsPage() {
@@ -15,7 +16,7 @@ export default function LocationsPage() {
   const [filter, setFilter] = useState('');
   const open = (l?: Loc, parent?: Loc) => setEdit(l
     ? { id: l.id, f: { name: l.name, type: l.type, parentId: l.parentId ?? '', state: l.state ?? '', code: l.code ?? '', email: l.email ?? '' } }
-    : { f: { name: '', type: parent ? (parent.type === 'REGION' ? 'STATE' : 'BRANCH') : 'REGION', parentId: parent?.id ?? '', state: '', code: '', email: '' } });
+    : { f: { name: '', type: parent ? (parent.type === 'ORGANIZATION' || parent.type === 'REGION' ? 'BRANCH' : 'BRANCH') : 'ORGANIZATION', parentId: parent?.id ?? '', state: '', code: '', email: '' } });
   const toggle = async (l: Loc) => {
     if (l.active && !(await confirm(`Deactivate ${l.namePath}? Inactive locations can’t receive assets or transfers. History is kept.`))) return;
     try { await api(`/api/locations/${l.id}`, { method: 'PATCH', body: { active: !l.active } }); toast(l.active ? 'Deactivated' : 'Activated'); reload(); } catch (e) { toast((e as Error).message, 'err'); }
@@ -26,8 +27,8 @@ export default function LocationsPage() {
   return (
     <div className="space-y-4">
       {node}
-      <PageHeader title="Locations" subtitle="Regions, states and branches. Branch users see their location and everything beneath it. Moving a location keeps every Asset ID unchanged."
-        actions={<button className="btn btn-primary" onClick={() => open()}>Add top-level location</button>} />
+      <PageHeader title="Locations" subtitle="Organizations (head quarters) and the locations beneath them. The organization at the top of a tree is the context every screen works in; branch users see their own location and everything under it. Moving a location keeps every Asset ID unchanged."
+        actions={<button className="btn btn-primary" onClick={() => open()}>Add organization</button>} />
       <input className="input max-w-sm" placeholder="Filter by name" value={filter} onChange={(e) => setFilter(e.target.value)} />
       <ErrorBox error={error} />
       <Card bodyClass="p-0">

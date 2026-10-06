@@ -3,6 +3,7 @@ import type { Db } from '@/lib/db';
 import { badRequest, conflict, forbidden } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { inScopePath } from '../scope';
+import { assertSameOrg, orgIdOfPath } from '../org';
 
 export interface HolderRef {
   type: HolderType;
@@ -34,23 +35,30 @@ export function holderColumns(h: HolderRef | null) {
   };
 }
 
-/** Validate a holder exists, is active, and (for branch users) is within scope. */
-export async function validateHolder(db: Db, actor: Actor, h: HolderRef) {
+/**
+ * Validate a holder exists, is active, is within the caller's scope, and belongs to the same
+ * organization as the asset (§19 — enforced here, in the service layer, not only in the UI).
+ * `assetOrgId` is the organization of the asset being assigned; pass null to skip that check.
+ */
+export async function validateHolder(db: Db, actor: Actor, h: HolderRef, assetOrgId: string | null = null) {
   if (h.type === 'EMPLOYEE') {
     const e = await db.employee.findUnique({ where: { id: h.id }, include: { location: true } });
     if (!e) throw badRequest('The selected employee does not exist.');
     if (!e.active) throw badRequest(`${e.name} is inactive and cannot be assigned assets.`);
     if (actor.role === 'BRANCH_USER' && !inScopePath(actor, e.location?.idPath)) throw forbidden('Branch users can only assign to employees of their own branch.');
+    assertSameOrg(assetOrgId, orgIdOfPath(e.location?.idPath), 'employee');
     return `${e.name} (${e.employeeCode})`;
   }
   if (h.type === 'DEPARTMENT') {
     const d = await db.department.findUnique({ where: { id: h.id } });
     if (!d || !d.active) throw badRequest('The selected department does not exist or is inactive.');
+    if (d.organizationId) assertSameOrg(assetOrgId, d.organizationId, 'department');
     return d.name;
   }
   const l = await db.location.findUnique({ where: { id: h.id } });
   if (!l || !l.active) throw badRequest('The selected location does not exist or is inactive.');
   if (actor.role === 'BRANCH_USER' && !inScopePath(actor, l.idPath)) throw forbidden('Branch users can only assign within their own branch.');
+  assertSameOrg(assetOrgId, orgIdOfPath(l.idPath), 'location');
   return l.namePath;
 }
 

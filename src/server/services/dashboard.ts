@@ -6,7 +6,6 @@ import { getSettings } from '../settings';
 import { assetWhere } from './assets';
 import { inboxCounts } from './approvals';
 import { renewableWhere } from './renewables';
-import { transferWhere } from './transfers';
 import { listCampaigns } from './verification';
 
 /**
@@ -17,7 +16,8 @@ import { listCampaigns } from './verification';
 export async function dashboard(actor: Actor) {
   const scope = assetScope(actor);
   const today = dateOnly(todayIST());
-  const [byStatus, byCategoryRaw, flags, openTransfers, inTransit, exceptions, approvals, settings] = await Promise.all([
+  const since = new Date(today.getTime() - 30 * 86_400_000);
+  const [byStatus, byCategoryRaw, flags, recentTransfers, approvals, settings, expiring, expired, warranty90, campaignList] = await Promise.all([
     prisma.asset.groupBy({ by: ['status'], where: scope, _count: true }),
     prisma.asset.groupBy({ by: ['categoryId'], where: { AND: [scope, { status: { not: 'RETIRED' } }] }, _count: true }),
     Promise.all([
@@ -25,13 +25,17 @@ export async function dashboard(actor: Actor) {
       prisma.asset.count({ where: { AND: [scope, { flagMissing: true }] } }),
       prisma.asset.count({ where: { AND: [scope, { flagDuplicateSuspect: true }] } }),
     ]),
-    transferWhere(actor, { status: ['PENDING_APPROVAL', 'IN_TRANSIT', 'PARTIALLY_RECEIVED'] }).then((w) => prisma.transfer.count({ where: w })),
-    transferWhere(actor, { status: ['IN_TRANSIT', 'PARTIALLY_RECEIVED'] }).then((w) => prisma.transfer.findMany({ where: w, select: { approvedAt: true } })),
-    prisma.transferException.count({ where: { status: 'OPEN', ...(actor.role === 'BRANCH_USER' ? { line: { transfer: { OR: [{ fromLocation: locationScope(actor) }, { toLocation: locationScope(actor) }] } } } : {}) } }),
+    // Assets moved to another location in the last 30 days (transfers are movements now).
+    prisma.assetMovement.count({ where: { kind: { in: ['TRANSFERRED', 'TRANSFER_RECEIVED'] }, recordedAt: { gte: since }, asset: assetScope(actor) } }),
     actor.role === 'BRANCH_USER'
       ? prisma.approvalRequest.count({ where: { status: 'PENDING', initiatorId: actor.id } }).then((n) => ({ total: n, byAction: {}, mine: true }))
       : inboxCounts(actor).then((c) => ({ ...c, mine: false })),
     getSettings(),
+    // One round trip for the renewal tiles instead of five sequential counts.
+    Promise.all([30, 60, 90].map(async (days) => prisma.renewable.count({ where: await renewableWhere(actor, { withinDays: days, status: ['ACTIVE', 'EXPIRED'] }) }))),
+    renewableWhere(actor, { expired: true, status: ['ACTIVE', 'EXPIRED'] }).then((w) => prisma.renewable.count({ where: w })),
+    assetWhere(actor, { warrantyWithinDays: 90 }).then((w) => prisma.asset.count({ where: w })),
+    listCampaigns(actor),
   ]);
   const cats = await prisma.assetCategory.findMany({ where: { id: { in: byCategoryRaw.map((c) => c.categoryId) } }, select: { id: true, name: true } });
   const cn = new Map(cats.map((c) => [c.id, c.name]));
@@ -54,13 +58,8 @@ export async function dashboard(actor: Actor) {
     ...(groupDepth === null ? [actor.scopeIdPath ?? '/__none__/'] : []),
   );
 
-  const expiring = await Promise.all([30, 60, 90].map(async (days) => prisma.renewable.count({ where: await renewableWhere(actor, { withinDays: days, status: ['ACTIVE', 'EXPIRED'] }) })));
-  const expired = await prisma.renewable.count({ where: await renewableWhere(actor, { expired: true, status: ['ACTIVE', 'EXPIRED'] }) });
-  const warranty90 = await prisma.asset.count({ where: await assetWhere(actor, { warrantyWithinDays: 90 }) });
-
-  const campaigns = (await listCampaigns(actor)).filter((c) => c.status === 'ACTIVE').slice(0, 5);
-
-  const aging = inTransit.filter((t) => t.approvedAt && (today.getTime() - dateOnly(t.approvedAt.toISOString().slice(0, 10)).getTime()) / 86_400_000 >= settings.transferAgingDays).length;
+  const campaigns = campaignList.filter((c) => c.status === 'ACTIVE').slice(0, 5);
+  void settings;
 
   const recent = actor.role === 'BRANCH_USER'
     ? (await prisma.assetMovement.findMany({
@@ -71,7 +70,7 @@ export async function dashboard(actor: Actor) {
 
   const statusCount = (s: string) => byStatus.find((x) => x.status === s)?._count ?? 0;
   return {
-    scope: actor.role === 'BRANCH_USER' ? actor.scopeName : 'All locations',
+    scope: actor.role === 'BRANCH_USER' ? actor.scopeName : actor.orgName ?? 'All locations',
     assets: {
       total: byStatus.reduce((n, x) => n + x._count, 0) - statusCount('RETIRED'),
       assigned: statusCount('ASSIGNED'), inStock: statusCount('IN_STOCK'), underRepair: statusCount('UNDER_REPAIR'), retired: statusCount('RETIRED'),
@@ -80,8 +79,7 @@ export async function dashboard(actor: Actor) {
     byLocation: locRows.map((r) => ({ id: r.id, name: r.path, total: Number(r.total), assigned: Number(r.assigned), inStock: Number(r.in_stock), underRepair: Number(r.repair) })),
     byLocationLabel: actor.role === 'BRANCH_USER' ? 'By branch' : 'By region',
     flags: { transferException: flags[0], missing: flags[1], duplicateSuspect: flags[2] },
-    transfers: { open: openTransfers, inTransit: inTransit.length, aging, agingDays: settings.transferAgingDays },
-    exceptionsOpen: exceptions,
+    transfers: { recent: recentTransfers },
     approvals,
     expiring: { d30: expiring[0], d60: expiring[1], d90: expiring[2], expired, warranty90 },
     verification: campaigns,

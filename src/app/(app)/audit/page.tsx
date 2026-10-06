@@ -9,7 +9,7 @@ import { ErrorBox, Modal, PageHeader, useToast } from '@/components/ui';
 
 interface Row { id: string; at: string; actorEmail: string | null; actorRole: string | null; action: string; entityType: string | null; entityId: string | null; entityLabel: string | null; before: unknown; after: unknown; details: unknown; ip: string | null }
 
-const link = (r: Row) => !r.entityId ? null : ({ Asset: `/assets/${r.entityId}`, Transfer: `/transfers/${r.entityId}`, Renewable: `/renewals/${r.entityId}`, Employee: `/employees/${r.entityId}`, VerificationTask: `/campaigns/tasks/${r.entityId}`, Import: `/imports/${r.entityId}`, ApprovalRequest: `/approvals/${r.entityId}`, IntegrationSource: `/integrations/sources/${r.entityId}`, IntegrationRun: `/integrations/runs/${r.entityId}` } as Record<string, string>)[r.entityType ?? ''] ?? null;
+const link = (r: Row) => !r.entityId ? null : ({ Asset: `/assets/${r.entityId}`, Renewable: `/renewals/${r.entityId}`, Employee: `/employees/${r.entityId}`, VerificationTask: `/campaigns/tasks/${r.entityId}`, Import: `/imports/${r.entityId}`, ApprovalRequest: `/approvals/${r.entityId}`, IntegrationSource: `/integrations/sources/${r.entityId}`, IntegrationRun: `/integrations/runs/${r.entityId}` } as Record<string, string>)[r.entityType ?? ''] ?? null;
 
 function Inner() {
   const toast = useToast();

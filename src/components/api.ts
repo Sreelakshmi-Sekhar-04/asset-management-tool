@@ -26,6 +26,10 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     }
     throw new ApiError(res.status, 'ERROR', res.statusText);
   }
+  // A change to master data invalidates the shared lists, so the next screen sees it.
+  if ((opts.method ?? (opts.body !== undefined || opts.form ? 'POST' : 'GET')) !== 'GET') {
+    for (const p of ['/api/locations', '/api/categories', '/api/departments']) if (path.startsWith(p)) clearCachedApi(p);
+  }
   return (ct.includes('application/json') ? res.json() : res.blob()) as Promise<T>;
 }
 
@@ -67,6 +71,52 @@ export async function openFile(path: string, body?: unknown) {
     win?.close();
     throw e;
   }
+}
+
+/**
+ * Master data (locations, categories, departments) that several screens need and that changes
+ * rarely. It is fetched once per browser tab and reused, so moving between screens does not
+ * re-request the same lists; in-flight requests for the same path are shared. The cache is
+ * dropped when the organization changes (the page reloads) or when the data is edited.
+ */
+const CACHE_MS = 2 * 60_000;
+const cache = new Map<string, { at: number; data: unknown }>();
+const inFlight = new Map<string, Promise<unknown>>();
+
+export function clearCachedApi(prefix?: string) {
+  for (const k of [...cache.keys()]) if (!prefix || k.startsWith(prefix)) cache.delete(k);
+}
+
+async function cachedGet<T>(path: string): Promise<T> {
+  const hit = cache.get(path);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.data as T;
+  const pending = inFlight.get(path);
+  if (pending) return pending as Promise<T>;
+  const p = api<T>(path).then((d) => { cache.set(path, { at: Date.now(), data: d }); return d; }).finally(() => inFlight.delete(path));
+  inFlight.set(path, p as Promise<unknown>);
+  return p;
+}
+
+/** Like useApi, for the shared master-data lists above. */
+export function useCachedApi<T = unknown>(path: string) {
+  const [data, setData] = useState<T | null>(() => {
+    const hit = cache.get(path);
+    return hit && Date.now() - hit.at < CACHE_MS ? (hit.data as T) : null;
+  });
+  const [error, setError] = useState<ApiError | null>(null);
+  const [loading, setLoading] = useState(!data);
+  const load = useCallback(async (force = false) => {
+    if (force) clearCachedApi(path.split('?')[0]);
+    setLoading(true);
+    try {
+      const d = await cachedGet<T>(path);
+      setData(d); setError(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(0, 'ERROR', String(e)));
+    } finally { setLoading(false); }
+  }, [path]);
+  useEffect(() => { load(); }, [load]);
+  return { data, error, loading, reload: () => load(true), setData };
 }
 
 export function useApi<T = unknown>(path: string | null, deps: unknown[] = []) {

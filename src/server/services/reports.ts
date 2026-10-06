@@ -99,7 +99,7 @@ export const REPORTS: ReportDef[] = [
     },
   },
   {
-    key: 'transfer-register', title: 'Transfer register', description: 'Every transfer with route, reason, requester, approver, dates and line results.',
+    key: 'transfer-history', title: 'Transfer history', description: 'Transfers recorded before transfers moved into the asset register: route, reason, requester, approver, dates and line results. Kept for asset tracking.',
     filters: ['status', 'fromLocationId', 'toLocationId', 'dateFrom', 'dateTo', 'search'],
     columns: [
       { key: 'transferNo', header: 'Transfer' }, { key: 'from', header: 'From' }, { key: 'to', header: 'To' }, { key: 'reason', header: 'Reason' },
@@ -111,21 +111,7 @@ export const REPORTS: ReportDef[] = [
     run: (a, f, p) => listTransfers(a, transferFilters(f), p),
   },
   {
-    key: 'in-transit', title: 'In-transit and aging', description: 'Transfers still awaiting receipt, with outstanding lines and days in transit. Rows past the aging threshold are marked.',
-    filters: ['fromLocationId', 'toLocationId'],
-    columns: [
-      { key: 'transferNo', header: 'Transfer' }, { key: 'from', header: 'From' }, { key: 'to', header: 'To' }, { key: 'status', header: 'Status', format: (v) => label(TRANSFER_STATUS_LABEL, v as string) },
-      { key: 'approvedAt', header: 'Dispatched', format: d }, { key: 'counts.pending', header: 'Outstanding lines' }, { key: 'counts.total', header: 'Total lines' },
-      { key: 'daysInTransit', header: 'Days in transit' }, { key: 'aging', header: 'Aging', format: (v) => (v ? 'Yes' : '') },
-    ],
-    run: async (a, f, p) => {
-      const threshold = (await getSettings()).transferAgingDays;
-      const r = await listTransfers(a, { ...transferFilters(f), status: ['IN_TRANSIT', 'PARTIALLY_RECEIVED'] }, { ...p, sort: 'approvedAt', dir: 'asc' });
-      return { rows: r.rows.map((x) => ({ ...x, aging: (x.daysInTransit ?? 0) >= threshold })), total: r.total, summary: { agingThresholdDays: threshold } };
-    },
-  },
-  {
-    key: 'exceptions', title: 'Transfer exceptions', description: 'Lines marked not received, with owner, age and resolution.',
+    key: 'exceptions', title: 'Transfer exceptions', description: 'Historical lines marked not received, with owner, age and resolution.',
     filters: ['status'],
     columns: [
       { key: 'line.transfer.transferNo', header: 'Transfer' }, { key: 'line.assetCode', header: 'Asset ID' }, { key: 'line.serialNumber', header: 'Serial' },

@@ -1,9 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '@/lib/db';
 import { actorForUser, decide, savePolicy } from '@/server/services/approvals';
-import { assignAsset, bulkCheckIn, checkInAsset } from '@/server/services/lifecycle';
+import { assignAsset, bulkAssign, bulkCheckIn, checkInAsset } from '@/server/services/lifecycle';
 import { createCategory } from '@/server/services/master';
-import { createTransfer, listTransfers, receive, resolveExceptions, resolveIdentifiers } from '@/server/services/transfers';
 import { createUser } from '@/server/services/users';
 import { world, PASSWORD, type World } from './fixtures';
 import { rejectsWith } from './helpers';
@@ -11,130 +10,139 @@ import { rejectsWith } from './helpers';
 let w: World;
 beforeAll(async () => { w = await world(); });
 
-type T = { transfer: { id: string; status: string }; pendingApproval?: { id: string } };
-const lines = (transferId: string) => prisma.transferLine.findMany({ where: { transferId }, orderBy: { assetCode: 'asc' } });
+const movements = (assetId: string) => prisma.assetMovement.findMany({ where: { assetId }, orderBy: { recordedAt: 'asc' } });
 
-describe('transfers', () => {
-  it('scanned label content (a scan link or a bare Asset ID) resolves to the asset; unknown codes are reported', async () => {
-    const a = await w.asset(w.A.id), b = await w.asset(w.A.id);
-    const r = await resolveIdentifiers(w.it.actor, `https://itam.example.com/scan/${encodeURIComponent(a.assetCode)}\n${b.assetCode.toLowerCase()}\nNOPE-404`, w.A.id);
-    expect(r.found.map((f) => f.id).sort()).toEqual([a.id, b.id].sort());
-    expect(r.unresolved).toEqual(['NOPE-404']);
-  });
-
-  it('assets ticked in the register resolve by record id and suggest the location that holds them all', async () => {
-    const a = await w.asset(w.A.id), b = await w.asset(w.A.id);
-    const r = await resolveIdentifiers(w.it.actor, '', undefined, [a.id, b.id, 'gone-id']);
-    expect(r.found.map((f) => f.id).sort()).toEqual([a.id, b.id].sort());
-    expect(r.unresolved).toEqual(['gone-id']);
-    expect(r.commonLocationId).toBe(w.A.id);
-    const c = await w.asset(w.B.id);
-    const mixed = await resolveIdentifiers(w.it.actor, '', undefined, [a.id, c.id]);
-    const [la, lb] = await Promise.all([w.A.id, w.B.id].map((id) => prisma.location.findUniqueOrThrow({ where: { id } })));
-    const shared = la.idPath.split('/').filter(Boolean).filter((seg, i) => lb.idPath.split('/').filter(Boolean)[i] === seg);
-    expect(mixed.commonLocationId).toBe(shared.at(-1) ?? null);
-  });
-
-  it('an IT-raised transfer is in transit at once, locks its assets, and moves them only on receipt', async () => {
-    const a1 = await w.asset(w.A.id), a2 = await w.asset(w.A.id);
-    const r = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'Rebalance', assetIds: [a1.id, a2.id] }) as T;
-    expect(r.transfer.status).toBe('IN_TRANSIT');
-    // Locked: a second transfer and an assignment are refused.
-    await rejectsWith(createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.C.id, reason: 'Again', assetIds: [a1.id] }), 400);
-    await rejectsWith(assignAsset(w.it.actor, a1.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } }), 409);
-    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a1.id } })).locationId).toBe(w.A.id);
-
-    // Partial receipt: one received, one not received with a mandatory reason.
-    const [l1, l2] = await lines(r.transfer.id);
-    await rejectsWith(receive(w.it.actor, r.transfer.id, { receivedByName: 'Guard', lines: [{ lineId: l2.id, outcome: 'NOT_RECEIVED' }] }), 400, /reason/i);
-    const res = await receive(w.it.actor, r.transfer.id, { receivedByName: 'Guard', lines: [{ lineId: l1.id, outcome: 'RECEIVED' }, { lineId: l2.id, outcome: 'NOT_RECEIVED', reason: 'Box empty' }] });
-    expect(res.status).toBe('COMPLETED');
-    const [x1, x2] = await prisma.asset.findMany({ where: { id: { in: [l1.assetId, l2.assetId] } }, orderBy: { assetCode: 'asc' } });
-    expect(x1.locationId).toBe(w.B.id);
-    expect(x2.locationId).toBe(w.A.id);
-    expect(x2.flagTransferException).toBe(true);
-    // A processed line cannot be received twice.
-    await rejectsWith(receive(w.it.actor, r.transfer.id, { receivedByName: 'Guard', lines: [{ lineId: l1.id, outcome: 'RECEIVED' }] }), 409);
-
-    // Resolving the exception as "located at sender" clears the flag.
-    const ex = await prisma.transferException.findFirstOrThrow({ where: { lineId: l2.id } });
-    await rejectsWith(resolveExceptions(w.brA.actor, { exceptionIds: [ex.id], resolution: 'LOCATED_AT_SENDER' }), 403);
-    await resolveExceptions(w.it.actor, { exceptionIds: [ex.id], resolution: 'LOCATED_AT_SENDER', note: 'Found in store' });
-    expect((await prisma.asset.findUniqueOrThrow({ where: { id: l2.assetId } })).flagTransferException).toBe(false);
-  });
-
-  it('the Transfer and Reason column filters find a transfer by number, Asset ID or reason text', async () => {
+describe('assign and transfer from the asset register', () => {
+  it('one asset to an employee: the employee holds it and the assignment history opens', async () => {
     const a = await w.asset(w.A.id);
-    const r = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: `Colfilter move ${w.s}`, assetIds: [a.id] }) as T & { transfer: { transferNo: string } };
-    const ids = async (f: Parameters<typeof listTransfers>[1]) => (await listTransfers(w.it.actor, f, { skip: 0, take: 50 })).rows.map((x) => x.id);
-    expect(await ids({ reason: `colfilter MOVE ${w.s}` })).toEqual([r.transfer.id]);
-    expect(await ids({ transferNo: a.assetCode.toLowerCase() })).toEqual([r.transfer.id]);
-    expect(await ids({ transferNo: r.transfer.transferNo, reason: `Colfilter move ${w.s}` })).toEqual([r.transfer.id]);
-    expect(await ids({ transferNo: r.transfer.transferNo, reason: 'not this one' })).toEqual([]);
-  });
-
-  it('a branch-raised transfer waits for IT approval; the receiving branch then confirms receipt', async () => {
-    const a = await w.asset(w.A.id);
-    const r = await createTransfer(w.brA.actor, { fromLocationId: w.A.id, toLocationId: w.C.id, reason: 'Staff moved', assetIds: [a.id] }) as T;
-    expect(r.transfer.status).toBe('PENDING_APPROVAL');
-    await rejectsWith(decide(w.brA.actor, r.pendingApproval!.id, 'APPROVE'), 403);
-    await decide(w.it.actor, r.pendingApproval!.id, 'APPROVE');
-    expect((await prisma.transfer.findUniqueOrThrow({ where: { id: r.transfer.id } })).status).toBe('IN_TRANSIT');
-    const res = await receive(w.brC.actor, r.transfer.id, { receivedByName: 'Branch C clerk', all: 'RECEIVED' });
-    expect(res.received).toBe(1);
-    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a.id } })).locationId).toBe(w.C.id);
-    const mv = await prisma.assetMovement.findFirstOrThrow({ where: { assetId: a.id, kind: 'TRANSFER_RECEIVED' } });
-    expect(mv.receivedByName).toBe('Branch C clerk');
-  });
-
-  it('rejecting a transfer approval releases the assets', async () => {
-    const a = await w.asset(w.A.id);
-    const r = await createTransfer(w.brA.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'x', assetIds: [a.id] }) as T;
-    await rejectsWith(decide(w.it.actor, r.pendingApproval!.id, 'REJECT'), 400, /comment/i);
-    await decide(w.it.actor, r.pendingApproval!.id, 'REJECT', 'Not needed');
-    expect((await prisma.transfer.findUniqueOrThrow({ where: { id: r.transfer.id } })).status).toBe('REJECTED');
-    const again = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'Now', assetIds: [a.id] }) as T;
-    expect(again.transfer.status).toBe('IN_TRANSIT');
-  });
-});
-
-describe('approval policies', () => {
-  let gatedCat: { id: string };
-  let it2: Awaited<ReturnType<typeof actorForUser>>;
-  beforeAll(async () => {
-    gatedCat = await createCategory(w.admin.actor, { name: `Gated ${w.s}` });
-    await savePolicy(w.admin.actor, null, { name: `Gated assign ${w.s}`, action: 'ASSIGN', categoryIds: [gatedCat.id], steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'IT_OPERATOR' }] });
-    await savePolicy(w.admin.actor, null, { name: `Gated check-in ${w.s}`, action: 'CHECK_IN', categoryIds: [gatedCat.id], steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'IT_OPERATOR' }] });
-    const u = await createUser(w.admin.actor, { email: `it2.${w.s}@test.example.com`, name: `IT two ${w.s}`, role: 'IT_OPERATOR', password: PASSWORD, sendInvite: false });
-    it2 = await actorForUser(prisma, u.id);
-  });
-  const gated = () => w.asset(w.A.id, { categoryId: gatedCat.id });
-
-  it('a matching policy holds the action; the requester cannot approve their own request; another approver executes it', async () => {
-    const a = await gated();
-    const r = await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
-    expect('pendingApproval' in r).toBe(true);
-    const reqId = (r as { pendingApproval: { id: string } }).pendingApproval.id;
-    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a.id } })).status).toBe('IN_STOCK');
-    await rejectsWith(decide(w.it.actor, reqId, 'APPROVE'), 403, /own request/);
-    await decide(it2, reqId, 'APPROVE', 'ok');
+    await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
     const after = await prisma.asset.findUniqueOrThrow({ where: { id: a.id } });
     expect(after.status).toBe('ASSIGNED');
     expect(after.holderEmployeeId).toBe(w.empA.id);
+    expect(after.locationId).toBe(w.A.id);
+    const open = await prisma.assetAssignment.findFirstOrThrow({ where: { assetId: a.id, endAt: null } });
+    expect(open.holderType).toBe('EMPLOYEE');
   });
 
-  it('bulk check-in goes through the same policy as a single check-in', async () => {
-    const [a, b] = [await gated(), await gated()];
-    // Assign directly as system via approval to reach ASSIGNED.
-    for (const x of [a, b]) {
-      const r = await assignAsset(w.it.actor, x.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } }) as { pendingApproval: { id: string } };
-      await decide(it2, r.pendingApproval.id, 'APPROVE');
-    }
-    const r = await bulkCheckIn(w.it.actor, [a.id, b.id], { remarks: 'Offboarding' });
-    expect('pendingApproval' in r).toBe(true);
-    expect((await prisma.asset.findMany({ where: { id: { in: [a.id, b.id] } } })).every((x) => x.status === 'ASSIGNED')).toBe(true);
-    await rejectsWith(checkInAsset(w.it.actor, a.id, {}), 409);
-    await decide(it2, (r as { pendingApproval: { id: string } }).pendingApproval.id, 'APPROVE');
-    expect((await prisma.asset.findMany({ where: { id: { in: [a.id, b.id] } } })).every((x) => x.status === 'IN_STOCK')).toBe(true);
+  it('one asset to a location is recorded as a transfer: it moves, and the move is in its history', async () => {
+    const a = await w.asset(w.A.id);
+    const r = await assignAsset(w.it.actor, a.id, { holder: { type: 'LOCATION', id: w.B.id }, remarks: 'Desk move' }) as { mode: string; assigned: number };
+    expect(r.mode).toBe('TRANSFER');
+    expect(r.assigned).toBe(1);
+    const after = await prisma.asset.findUniqueOrThrow({ where: { id: a.id } });
+    expect(after.locationId).toBe(w.B.id);
+    expect(after.status).toBe('IN_STOCK');
+    const m = (await movements(a.id)).at(-1)!;
+    expect(m.kind).toBe('TRANSFERRED');
+    expect(m.fromLocationId).toBe(w.A.id);
+    expect(m.toLocationId).toBe(w.B.id);
+    expect(m.remarks).toBe('Desk move');
+    const audited = await prisma.auditLog.findFirstOrThrow({ where: { action: 'ASSET_TRANSFERRED', entityId: a.id } });
+    expect(audited.entityLabel).toBe(a.assetCode);
+  });
+
+  it('transferring an asset held by an employee releases the holding and brings it in stock at the destination', async () => {
+    const a = await w.asset(w.A.id);
+    await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
+    await assignAsset(w.it.actor, a.id, { holder: { type: 'LOCATION', id: w.B.id } });
+    const after = await prisma.asset.findUniqueOrThrow({ where: { id: a.id } });
+    expect(after.holderType).toBeNull();
+    expect(after.status).toBe('IN_STOCK');
+    expect(after.locationId).toBe(w.B.id);
+    // The employee's holding is closed, not deleted: the history keeps both periods.
+    const periods = await prisma.assetAssignment.findMany({ where: { assetId: a.id } });
+    expect(periods).toHaveLength(1);
+    expect(periods[0].endAt).not.toBeNull();
+  });
+
+  it('several assets move to one location in a single action', async () => {
+    const assets = [await w.asset(w.A.id), await w.asset(w.A.id), await w.asset(w.A.id)];
+    const r = await bulkAssign(w.it.actor, { assetIds: assets.map((a) => a.id), holder: { type: 'LOCATION', id: w.B.id }, remarks: 'Branch consolidation' }) as { mode: string; assigned: number };
+    expect(r.mode).toBe('TRANSFER');
+    expect(r.assigned).toBe(3);
+    expect(await prisma.asset.count({ where: { id: { in: assets.map((a) => a.id) }, locationId: w.B.id } })).toBe(3);
+    for (const a of assets) expect((await movements(a.id)).at(-1)!.kind).toBe('TRANSFERRED');
+  });
+
+  it('the check step reports what would happen and changes nothing', async () => {
+    const stay = await w.asset(w.B.id);
+    const move = await w.asset(w.A.id);
+    const r = await bulkAssign(w.it.actor, { assetIds: [stay.id, move.id], holder: { type: 'LOCATION', id: w.B.id }, dryRun: true }) as { assignable: number; assigned: number; skipped: { ref: string }[] };
+    expect(r.assignable).toBe(1);
+    expect(r.assigned).toBe(0);
+    expect(r.skipped.map((s) => s.ref)).toEqual([stay.assetCode]);
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: move.id } })).locationId).toBe(w.A.id);
+  });
+
+  it('an asset under repair or retired cannot be transferred, and the rest still move', async () => {
+    const ok = await w.asset(w.A.id);
+    const repair = await w.asset(w.A.id);
+    const { startRepair } = await import('@/server/services/lifecycle');
+    await startRepair(w.it.actor, repair.id, { reason: 'Broken screen' });
+    const r = await bulkAssign(w.it.actor, { assetIds: [ok.id, repair.id], holder: { type: 'LOCATION', id: w.B.id } }) as { assigned: number; failed: { ref: string; message: string }[] };
+    expect(r.assigned).toBe(1);
+    expect(r.failed.map((f) => f.ref)).toEqual([repair.assetCode]);
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: repair.id } })).locationId).toBe(w.A.id);
+  });
+
+  it('a check-in after a transfer still works, and bulk check-in is unaffected', async () => {
+    const a = await w.asset(w.A.id);
+    await bulkAssign(w.it.actor, { assetIds: [a.id], holder: { type: 'LOCATION', id: w.B.id } });
+    await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
+    await checkInAsset(w.it.actor, a.id, {});
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a.id } })).status).toBe('IN_STOCK');
+    const b = await w.asset(w.A.id);
+    await assignAsset(w.it.actor, b.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
+    await bulkCheckIn(w.it.actor, [b.id], {});
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: b.id } })).status).toBe('IN_STOCK');
+  });
+});
+
+describe('approvals gate assignments and transfers alike', () => {
+  it('a matching Assign policy holds the transfer until it is approved, then carries it out', async () => {
+    const cat = await createCategory(w.sys, { name: `Gated ${w.s}`, serialRequired: false });
+    const policy = await savePolicy(w.admin.actor, null, {
+      name: `Assign sign-off ${w.s}`, action: 'ASSIGN', priority: 1, categoryIds: [cat.id],
+      steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }],
+    });
+    const a = await w.asset(w.A.id, { categoryId: cat.id });
+    const r = await bulkAssign(w.it.actor, { assetIds: [a.id], holder: { type: 'LOCATION', id: w.B.id }, remarks: 'Needs sign-off' }) as { assigned: number; pendingApproval?: { id: string } };
+    expect(r.assigned).toBe(0);
+    expect(r.pendingApproval).toBeTruthy();
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a.id } })).locationId).toBe(w.A.id);
+    // While it waits, the asset cannot be moved another way.
+    await rejectsWith(bulkAssign(w.it.actor, { assetIds: [a.id], holder: { type: 'EMPLOYEE', id: w.empA.id } }), 400, /None of the 1/);
+    await decide(w.admin.actor, r.pendingApproval!.id, 'APPROVE', 'Go ahead');
+    const after = await prisma.asset.findUniqueOrThrow({ where: { id: a.id } });
+    expect(after.locationId).toBe(w.B.id);
+    const m = (await movements(a.id)).at(-1)!;
+    expect(m.kind).toBe('TRANSFERRED');
+    expect(m.approverName).toContain(w.admin.user.name);
+    await savePolicy(w.admin.actor, policy!.id, { name: policy!.name, action: 'ASSIGN', priority: 1, active: false, categoryIds: [cat.id], steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }] });
+  });
+
+  it('a rejected request leaves the asset exactly where it was', async () => {
+    const cat = await createCategory(w.sys, { name: `Gated2 ${w.s}`, serialRequired: false });
+    const policy = await savePolicy(w.admin.actor, null, {
+      name: `Assign sign-off 2 ${w.s}`, action: 'ASSIGN', priority: 1, categoryIds: [cat.id],
+      steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }],
+    });
+    const a = await w.asset(w.A.id, { categoryId: cat.id });
+    const r = await bulkAssign(w.it.actor, { assetIds: [a.id], holder: { type: 'LOCATION', id: w.B.id } }) as { pendingApproval?: { id: string } };
+    await decide(w.admin.actor, r.pendingApproval!.id, 'REJECT', 'Keep it where it is');
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: a.id } })).locationId).toBe(w.A.id);
+    // Released again: the asset can now be assigned normally.
+    await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
+    await savePolicy(w.admin.actor, policy!.id, { name: policy!.name, action: 'ASSIGN', priority: 1, active: false, categoryIds: [cat.id], steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }] });
+  });
+
+  it('a branch user can assign and transfer only inside their own branch', async () => {
+    const mine = await w.asset(w.A.id);
+    const theirs = await w.asset(w.C.id);
+    await rejectsWith(bulkAssign(w.brA.actor, { assetIds: [theirs.id], holder: { type: 'LOCATION', id: w.A.id } }), 400);
+    await rejectsWith(bulkAssign(w.brA.actor, { assetIds: [mine.id], holder: { type: 'LOCATION', id: w.C.id } }), 403);
+    const u = await createUser(w.sys, { email: `extra.${w.s}@test.example.com`, name: `Extra ${w.s}`, role: 'BRANCH_USER', locationId: w.A.id, password: PASSWORD, sendInvite: false });
+    const actor = await actorForUser(prisma, u.id, w.org.id);
+    expect(actor.orgId).toBe(w.org.id);
   });
 });

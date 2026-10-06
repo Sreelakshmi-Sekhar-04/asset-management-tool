@@ -20,11 +20,10 @@ import { actorForUser, decide, savePolicy } from '@/server/services/approvals';
 import { createAsset } from '@/server/services/assets';
 import { createEmployee } from '@/server/services/employees';
 import { processBatch, saveSource } from '@/server/services/integrations';
-import { assignAsset, retireAsset, startRepair } from '@/server/services/lifecycle';
+import { assignAsset, bulkAssign, retireAsset, startRepair } from '@/server/services/lifecycle';
 import { createLocation } from '@/server/services/locations';
 import { createCategory, createDepartment, updateSettings } from '@/server/services/master';
 import { createRenewable, saveReminderPolicy } from '@/server/services/renewables';
-import { createTransfer, receive } from '@/server/services/transfers';
 import { createUser } from '@/server/services/users';
 import { createCampaign, markLines, submitTask } from '@/server/services/verification';
 
@@ -89,7 +88,8 @@ async function main() {
   const regionIds: Record<string, string> = {};
   let bn = 0;
   for (const [region, states] of Object.entries(REGIONS)) {
-    const r = await createLocation(adminA, { name: region, type: 'REGION', parentId: null });
+    // The root of the tree is the organization / head quarter.
+    const r = await createLocation(adminA, { name: region, type: 'ORGANIZATION', parentId: null });
     regionIds[region] = r.id;
     for (const [state, names] of Object.entries(states)) {
       const s = await createLocation(adminA, { name: state, type: 'STATE', state, parentId: r.id });
@@ -187,51 +187,25 @@ async function main() {
 
   // ── Approval and reminder policies ──
   await savePolicy(adminA, null, { name: 'High-value transfers (₹1 lakh+)', action: 'TRANSFER', priority: 10, minCost: 100000, steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'IT_OPERATOR' }, { stepOrder: 2, approverType: 'ROLE', approverRole: 'ADMIN' }] });
-  await savePolicy(adminA, null, { name: 'Inter-state transfers', action: 'TRANSFER', priority: 20, interState: true, steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'IT_OPERATOR' }] });
+  await savePolicy(adminA, null, { name: 'Branch-raised assignments and transfers', action: 'ASSIGN', priority: 20, initiatorRole: 'BRANCH_USER', steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'IT_OPERATOR' }] });
   await savePolicy(adminA, null, { name: 'Retirement sign-off', action: 'RETIRE', priority: 10, steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }] });
   await savePolicy(adminA, null, { name: 'Assets above ₹2 lakh', action: 'ASSET_CREATE', priority: 10, minCost: 200000, steps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }] });
   await saveReminderPolicy(adminA, null, { name: 'Standard reminders', leadDays: [90, 30, 7, 1], notifyOwner: true, roles: ['IT_OPERATOR'], escalationDays: 7, escalationRole: 'ADMIN', priority: 100 });
 
-  // ── Transfers in every state ──
+  // ── Transfers, made the way the asset register makes them: assign to a location ──
   const stockAt = async (branchId: string, n: number, exclude: string[] = []) =>
-    (await prisma.asset.findMany({ where: { locationId: branchId, status: { in: ['IN_STOCK', 'ASSIGNED'] }, id: { notIn: exclude }, transferLines: { none: { status: { in: ['PENDING_APPROVAL', 'IN_TRANSIT'] } } }, purchaseCost: { lt: 100000 } }, take: n, orderBy: { assetCode: 'asc' } })).map((a) => a.id);
+    (await prisma.asset.findMany({ where: { locationId: branchId, status: { in: ['IN_STOCK', 'ASSIGNED'] }, id: { notIn: exclude }, purchaseCost: { lt: 100000 } }, take: n, orderBy: { assetCode: 'asc' } })).map((a) => a.id);
   const used: string[] = [];
   const take = async (b: string, n: number) => { const ids = await stockAt(b, n, used); used.push(...ids); return ids; };
-
-  // Completed (intra-state, IT-raised → auto-approved), received in full.
-  const t1 = await createTransfer(it, { fromLocationId: byName('Thiruvananthapuram').id, toLocationId: byName('Kollam').id, reason: 'Branch expansion at Kollam', assetIds: await take(byName('Thiruvananthapuram').id, 3) });
-  await receive(branchUsers[byName('Kollam').id], (t1 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Store keeper, Kollam', all: 'RECEIVED' });
-  // Completed with an exception (one line not received).
-  const t2 = await createTransfer(it, { fromLocationId: byName('Alappuzha').id, toLocationId: byName('Kottayam').id, reason: 'Replacement stock for Kottayam', assetIds: await take(byName('Alappuzha').id, 3) });
-  const t2id = (t2 as { transfer: { id: string } }).transfer.id;
-  const t2lines = await prisma.transferLine.findMany({ where: { transferId: t2id }, orderBy: { assetCode: 'asc' } });
-  await receive(branchUsers[byName('Kottayam').id], t2id, { receivedByName: 'Kottayam branch manager', lines: t2lines.map((l, i) => ({ lineId: l.id, outcome: i === 0 ? 'NOT_RECEIVED' : 'RECEIVED', reason: i === 0 ? 'Box missing on delivery' : null })) });
-  // Partially received.
-  const t3 = await createTransfer(it, { fromLocationId: byName('Kozhikode').id, toLocationId: byName('Malappuram').id, reason: 'Temporary deployment for audit season', assetIds: await take(byName('Kozhikode').id, 4) });
-  const t3id = (t3 as { transfer: { id: string } }).transfer.id;
-  const t3first = await prisma.transferLine.findFirstOrThrow({ where: { transferId: t3id }, orderBy: { assetCode: 'asc' } });
-  await receive(branchUsers[byName('Malappuram').id], t3id, { receivedByName: 'Malappuram front office', lines: [{ lineId: t3first.id, outcome: 'RECEIVED' }] });
-  // In transit (and aged beyond the threshold for the aging report).
-  const t4 = await createTransfer(it, { fromLocationId: byName('Kochi Kakkanad').id, toLocationId: byName('Kochi MG Road').id, reason: 'Desk moves to Kochi MG Road', assetIds: await take(byName('Kochi Kakkanad').id, 2) });
-  await prisma.transfer.update({ where: { id: (t4 as { transfer: { id: string } }).transfer.id }, data: { approvedAt: new Date(Date.now() - 10 * 86_400_000) } });
-  await createTransfer(it, { fromLocationId: byName('Thrissur').id, toLocationId: byName('Palakkad').id, reason: 'New joiners at Palakkad', assetIds: await take(byName('Thrissur').id, 2) });
-  // Pending approval: branch-raised (falls back to IT approval).
-  await createTransfer(branchUsers[byName('Kasaragod').id], { fromLocationId: byName('Kasaragod').id, toLocationId: byName('Kalpetta').id, reason: 'Kalpetta printer failed; lending a spare', assetIds: await take(byName('Kasaragod').id, 1) });
-  // Pending approval: inter-state (policy).
-  await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Kasaragod').id, reason: 'Stock replenishment for North Kerala', invoiceNumber: 'DC/2026/0412', assetIds: await take(hq.id, 3) });
-  // Rejected: branch-raised, IT rejects.
-  const t8 = await createTransfer(branchUsers[byName('Pathanamthitta').id], { fromLocationId: byName('Pathanamthitta').id, toLocationId: byName('Thiruvananthapuram').id, reason: 'Return surplus monitor', assetIds: await take(byName('Pathanamthitta').id, 1) });
-  const t8req = await prisma.transfer.findUniqueOrThrow({ where: { id: (t8 as { transfer: { id: string } }).transfer.id } });
-  if (t8req.approvalRequestId) await decide(it2, t8req.approvalRequestId, 'REJECT', 'Keep the monitor at Pathanamthitta; Thiruvananthapuram has spares.');
-  // Draft.
-  await createTransfer(it, { fromLocationId: byName('Kannur').id, toLocationId: byName('Kozhikode').id, reason: 'Consolidate spares at Kozhikode', assetIds: await take(byName('Kannur').id, 2), submit: false });
-  // Cancelled.
-  const { cancelTransfer } = await import('../src/server/services/transfers');
-  const t10 = await createTransfer(it, { fromLocationId: byName('Kalpetta').id, toLocationId: byName('Kasaragod').id, reason: 'Raised in error', assetIds: await take(byName('Kalpetta').id, 1), submit: false });
-  await cancelTransfer(it, (t10 as { transfer: { id: string } }).transfer.id);
-  // Late-recorded (back-dated by IT).
-  const t11 = await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Alappuzha').id, reason: 'Physical move done last week; recording now', effectiveDate: addDays(today, -6), assetIds: await take(hq.id, 1) });
-  await receive(branchUsers[byName('Alappuzha').id], (t11 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Alappuzha IT desk', all: 'RECEIVED' });
+  const moveTo = async (fromName: string, toName: string, n: number, remarks: string) =>
+    bulkAssign(it, { assetIds: await take(byName(fromName).id, n), holder: { type: 'LOCATION', id: byName(toName).id }, remarks });
+  await moveTo('Thiruvananthapuram', 'Kollam', 3, 'Branch expansion at Kollam');
+  await moveTo('Alappuzha', 'Kottayam', 3, 'Replacement stock for Kottayam');
+  await moveTo('Kozhikode', 'Malappuram', 4, 'Temporary deployment for audit season');
+  await moveTo('Kochi Kakkanad', 'Kochi MG Road', 2, 'Desk moves to Kochi MG Road');
+  await moveTo('Thrissur', 'Palakkad', 2, 'New joiners at Palakkad');
+  await moveTo('Kasaragod', 'Kalpetta', 1, 'Kalpetta printer failed; lending a spare');
+  await moveTo('Kannur', 'Kozhikode', 2, 'Consolidate spares at Kozhikode');
 
   // ── Renewables beyond automatic warranties ──
   const fw = assets.filter((a) => a.cat === 'Firewall');

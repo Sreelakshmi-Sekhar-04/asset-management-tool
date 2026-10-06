@@ -10,6 +10,10 @@ export interface Actor {
   locationId: string | null;
   scopeIdPath: string | null;
   scopeName: string | null;
+  /** Organization context (§11-18): the root location whose data the caller is working in. */
+  orgId: string | null;
+  orgIdPath: string | null;
+  orgName: string | null;
   employeeId: string | null;
   sessionId?: string;
   ip?: string | null;
@@ -25,6 +29,9 @@ export const SYSTEM_ACTOR: Actor = {
   locationId: null,
   scopeIdPath: null,
   scopeName: null,
+  orgId: null,
+  orgIdPath: null,
+  orgName: null,
   employeeId: null,
 };
 

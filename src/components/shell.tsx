@@ -16,9 +16,6 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/assets', label: 'Asset register' },
     { href: '/employees', label: 'Users & Employees' },
   ] },
-  { group: 'Transfers', items: [
-    { href: '/transfers', label: 'Transfer register' },
-  ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
     { href: '/campaigns', label: 'Campaigns' },
@@ -41,7 +38,7 @@ const NAV: { group: string; items: Item[] }[] = [
   ] },
 ];
 /** Pages without a menu entry of their own, shown under the entry they are reached from. */
-const UNDER: [string, string][] = [['/scan', '/assets'], ['/imports', '/assets']];
+const UNDER: [string, string][] = [['/scan', '/assets'], ['/imports', '/assets'], ['/transfers', '/assets']];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const me = useMe();
@@ -53,12 +50,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
     let alive = true;
-    const tick = () => api<{ unread: number }>('/api/auth/me').then((r) => alive && setUnread(r.unread)).catch(() => undefined);
+    const tick = () => api<{ unread: number }>('/api/notifications/count').then((r) => alive && setUnread(r.unread)).catch(() => undefined);
     tick();
     const t = setInterval(tick, 60_000);
     window.addEventListener('itam:notifications', tick);
     return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
-  }, [pathname]);
+    // Deliberately not keyed on the path: the unread count is polled and refreshed by event,
+    // so navigating between screens must not re-request it.
+  }, []);
   const under = (p: string) => UNDER.find(([from]) => p === from || p.startsWith(`${from}/`))?.[1] ?? p;
   const isActive = (href: string) => {
     const p = under(pathname);
@@ -110,6 +109,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {open && <div className="fixed inset-0 z-30 bg-slate-900/30 lg:hidden" onClick={() => setOpen(false)} />}
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b bg-white/95 px-3 py-2 backdrop-blur sm:px-4">
         <button className="btn btn-ghost btn-sm lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
+        <OrganizationPicker />
         <div className="ml-auto flex items-center gap-2">
           <Link href="/notifications" className="btn btn-ghost btn-sm relative" aria-label={`Notifications (${unread} unread)`}>
             🔔{unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{unread > 99 ? '99+' : unread}</span>}
@@ -132,5 +132,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mx-auto max-w-[1400px] px-3 py-4 sm:px-6">{children}</main>
     </div>
+  );
+}
+
+/**
+ * Organization (head quarter) selector (§12). Choosing one stores it server-side in a cookie
+ * and reloads, so every screen — dashboard, asset register, people, locations — shows that
+ * organization's data until it is changed (§15).
+ */
+function OrganizationPicker() {
+  const me = useMe();
+  const [busy, setBusy] = useState(false);
+  if (!me.organization) return null;
+  if (!me.canSwitchOrganization || me.organizations.length < 2) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-slate-500">
+        <span className="hidden sm:inline">Organization:</span>
+        <span className="font-medium text-slate-700">{me.organization.name}</span>
+      </span>
+    );
+  }
+  const change = async (id: string) => {
+    if (id === me.organization!.id) return;
+    setBusy(true);
+    try {
+      await api('/api/organizations', { body: { organizationId: id } });
+      window.location.reload();
+    } catch { setBusy(false); }
+  };
+  return (
+    <label className="flex items-center gap-1 text-xs text-slate-500">
+      <span className="hidden sm:inline">Organization</span>
+      <select className="input h-8 w-auto max-w-[12rem] py-0 text-sm" value={me.organization.id} disabled={busy} onChange={(e) => change(e.target.value)} aria-label="Organization">
+        {me.organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </label>
   );
 }

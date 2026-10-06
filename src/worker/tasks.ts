@@ -2,7 +2,6 @@ import { prisma } from '@/lib/db';
 import { todayIST } from '@/lib/format';
 import { purgeExpiredImportReports, runCommit, runValidation } from '@/server/import/engine';
 import { claimNext, finish } from '@/server/jobs/queue';
-import { runTransferAging } from '@/server/services/aging';
 import { purgeExpiredDocuments } from '@/server/services/documents';
 import { scheduledIntegrations } from '@/server/services/integrations';
 import { runRenewalReminders } from '@/server/services/renewables';
@@ -37,7 +36,6 @@ export async function drainJobs(limit = 20) {
 export const DAILY_TASKS: Record<string, (asOf: string) => Promise<unknown>> = {
   'renewal-reminders': (d) => runRenewalReminders(d),
   'verification-scheduler': (d) => runVerificationScheduler(d),
-  'transfer-aging': (d) => runTransferAging(d),
   'document-purge': () => purgeExpiredDocuments(),
   'import-report-purge': () => purgeExpiredImportReports(),
   housekeeping: () => housekeeping(),

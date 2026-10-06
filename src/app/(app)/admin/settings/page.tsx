@@ -52,11 +52,10 @@ export default function SettingsPage() {
           <Field label="Lockout duration (minutes)"><input {...num('lockoutMinutes')} min={1} max={1440} /></Field>
         </div>
       </Card>
-      <Card title="Assets and transfers">
+      <Card title="Assets">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Duplicate serial number"><select className="input" disabled><option>Block (always)</option></select></Field>
           {(['hostname', 'ip'] as const).map((k) => <Field key={k} label={`Duplicate ${k === 'ip' ? 'IP address' : 'hostname'}`}><select className="input" value={s.duplicateRules[k]} onChange={(e) => setS({ ...s, duplicateRules: { ...s.duplicateRules, [k]: e.target.value } })}><option value="BLOCK">Block</option><option value="WARN">Warn and ask for a reason</option><option value="OFF">Allow</option></select></Field>)}
-          <Field label="Transfer aging threshold (days in transit)"><input {...num('transferAgingDays')} min={1} max={365} /></Field>
           <Field label="Scanner advance key"><select className="input" value={s.scannerAdvanceKey} onChange={(e) => setS({ ...s, scannerAdvanceKey: e.target.value as 'Enter' })}><option>Enter</option><option>Tab</option></select></Field>
           <Field label="Campaign reminders (days before due)"><input className="input" value={verDays} onChange={(e) => setVerDays(e.target.value)} /></Field>
         </div>

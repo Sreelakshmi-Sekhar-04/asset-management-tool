@@ -5,20 +5,23 @@ import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit, diff } from '../audit';
-import { inScopePath, locationScope } from '../scope';
+import { inScopePath, locationScope, scopePath } from '../scope';
 
 export const locationInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120).refine((s) => !s.includes('/'), 'Name cannot contain "/"'),
   parentId: z.string().nullable().optional(),
-  type: z.enum(['REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER']).default('BRANCH'),
+  type: z.enum(['ORGANIZATION', 'REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER']).default('BRANCH'),
   state: z.string().trim().max(80).nullable().optional(),
   code: z.string().trim().max(40).nullable().optional(),
   email: z.string().trim().email().nullable().optional().or(z.literal('').transform(() => null)),
 });
 
 export async function listLocations(actor: Actor, opts: { includeInactive?: boolean; all?: boolean } = {}) {
+  // `all` widens past a branch user's own subtree (destination pickers), never past the
+  // selected organization: locations of another organization are never offered or listed.
+  const orgOnly = actor.orgIdPath ? { idPath: { startsWith: actor.orgIdPath } } : {};
   const rows = await prisma.location.findMany({
-    where: { ...(opts.all ? {} : locationScope(actor)), ...(opts.includeInactive ? {} : { active: true }) },
+    where: { ...(opts.all ? orgOnly : locationScope(actor)), ...(opts.includeInactive ? {} : { active: true }) },
     orderBy: { namePath: 'asc' },
   });
   const counts = await prisma.asset.groupBy({ by: ['locationId'], where: { status: { not: 'RETIRED' } }, _count: true });

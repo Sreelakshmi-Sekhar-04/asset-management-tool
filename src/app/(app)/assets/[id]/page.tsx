@@ -11,6 +11,7 @@ import { DocumentsPanel } from '@/components/documents';
 import { AssetQrCard, PrintLabelsDialog } from '@/components/labels';
 import { useMe } from '@/components/me';
 import { HolderPicker, LocationSelect, type HolderValue } from '@/components/pickers';
+import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
 import { Badge, Card, ErrorBox, Field, FormModal, Modal, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
 
 interface Detail {
@@ -55,12 +56,11 @@ export default function AssetDetail() {
         subtitle={`${a.category} · ${a.make} ${a.model}${a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}`}
         actions={<>
           {!retired && <button className="btn" onClick={() => setDlg('edit')}>Edit</button>}
-          {me.isIT && !retired && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('assign')}>{a.status === 'ASSIGNED' ? 'Reassign' : 'Assign'}</button>}
+          {me.isIT && !retired && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('assign')}>Assign / transfer</button>}
           {me.isIT && !locked && a.status === 'ASSIGNED' && <button className="btn" onClick={() => setDlg('checkin')}>Check in</button>}
           {me.isIT && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('repair')}>Send to repair</button>}
           {me.isIT && !locked && a.status === 'UNDER_REPAIR' && <button className="btn" onClick={() => setDlg('repairdone')}>Repair done</button>}
           {me.isIT && !locked && a.status === 'IN_STOCK' && <button className="btn" onClick={() => setDlg('retire')}>Retire</button>}
-          {!retired && !locked && <Link className="btn" href={`/transfers/new?assetId=${a.id}&from=${a.locationId}`}>Transfer</Link>}
           <button className="btn" onClick={() => setDlg('label')}>Print label</button>
           {me.isAdmin && !retired && !locked && <button className="btn" onClick={() => setDlg('correct')}>Correct location / holder</button>}
           {me.isIT && a.flags.length > 0 && <button className="btn" onClick={() => setDlg('clear')}>Clear flag</button>}
@@ -68,9 +68,9 @@ export default function AssetDetail() {
 
       {justRegistered && <div className="flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm">Registered as <b className="font-mono">{a.assetCode}</b>. Print its label and attach it to the device.<button className="btn btn-sm btn-primary" onClick={() => setDlg('label')}>Print label</button></div>}
       {scanned && <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">Opened from a scan.<Link className="btn btn-sm" href="/scan">Scan next</Link></div>}
-      {a.openTransfer && <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">In open transfer <Link href={`/transfers/${a.openTransfer.id}`}>{a.openTransfer.transferNo}</Link> to {a.openTransfer.toLocation}. Location, holder and status are locked until it is received or recalled.</div>}
+      {a.openTransfer && <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">Part of transfer {a.openTransfer.transferNo} to {a.openTransfer.toLocation}, raised before transfers moved into the asset register.</div>}
       {a.pendingApprovals.map((p) => <div key={p.id} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">Pending approval <Link href={`/approvals/${p.id}`}>{p.requestNo}</Link>: {p.summary}. The asset is locked until it is decided.</div>)}
-      {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Transfer exception: {x.reason} · <Link href={`/transfers/${x.transferId}`}>open transfer</Link> · <Link href="/transfers?view=exceptions">resolve</Link></div>)}
+      {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Transfer exception on record: {x.reason}. Transfer it again from here once it is found, or clear the flag.</div>)}
 
       <Tabs value={tab} onChange={setTab} tabs={[{ key: 'overview', label: 'Overview' }, { key: 'history', label: 'History' }, { key: 'renewables', label: `Renewables (${a.renewables.length})` }, { key: 'documents', label: 'Documents' }, ...(a.deviceData.length ? [{ key: 'device', label: 'Device data' }] : [])]} />
 
@@ -163,7 +163,8 @@ export default function AssetDetail() {
 
       <PrintLabelsDialog open={dlg === 'label'} onClose={() => setDlg('')} assetIds={[a.id]} title={`Print label for ${a.assetCode}`} />
       <EditDialog open={dlg === 'edit'} onClose={() => setDlg('')} a={a} branchOnly={me.isBranch} onDone={done('Saved')} />
-      <AssignDialog open={dlg === 'assign'} onClose={() => setDlg('')} a={a} onDone={done('Assigned')} />
+      <BulkAssignDialog open={dlg === 'assign'} onClose={() => setDlg('')} count={1} selection={() => ({ assetIds: [a.id] })}
+        onDone={(r) => { toast(bulkAssignMessage(r)); reload(); }} />
       <SimpleDialog open={dlg === 'checkin'} onClose={() => setDlg('')} title={`Check in ${a.assetCode}`} submitLabel="Check in" fields={[{ k: 'condition', label: 'Condition' }, { k: 'remarks', label: 'Remarks', area: true }]} path={`/api/assets/${a.id}/check-in`} onDone={done('Checked in')} note={`Returns the asset from ${a.holder} to stock at ${a.location}.`} />
       <SimpleDialog open={dlg === 'repair'} onClose={() => setDlg('')} title={`Send ${a.assetCode} to repair`} submitLabel="Send to repair" fields={[{ k: 'reason', label: 'Reason', area: true, required: true }]} path={`/api/assets/${a.id}/repair`} onDone={done('Marked under repair')} note={a.holder ? `The holder (${a.holder}) is kept; the asset returns to them when the repair is done.` : undefined} />
       <SimpleDialog open={dlg === 'repairdone'} onClose={() => setDlg('')} title={`Complete repair of ${a.assetCode}`} submitLabel="Repair done" fields={[{ k: 'condition', label: 'Condition' }, { k: 'remarks', label: 'Remarks', area: true }]} path={`/api/assets/${a.id}/repair-done`} onDone={done('Repair completed')} />
@@ -246,19 +247,6 @@ function EditDialog({ open, onClose, a, branchOnly, onDone }: { open: boolean; o
       {serialChanged && <Field label="Reason for changing the serial number" required className="mt-3"><input className="input" value={serialReason} onChange={(e) => setSerialReason(e.target.value)} /></Field>}
       <div className="mt-3"><DuplicateNotice error={err} reason={dupReason} setReason={setDupReason} /></div>
     </Modal>
-  );
-}
-
-function AssignDialog({ open, onClose, a, onDone }: { open: boolean; onClose: () => void; a: Detail; onDone: (r: unknown) => void }) {
-  const [h, setH] = useState<HolderValue>(null);
-  const [remarks, setRemarks] = useState('');
-  return (
-    <FormModal open={open} onClose={onClose} title={`${a.status === 'ASSIGNED' ? 'Reassign' : 'Assign'} ${a.assetCode}`} submitLabel="Assign" disabled={!h}
-      onSubmit={async () => onDone(await api(`/api/assets/${a.id}/assign`, { body: { holder: h && { type: h.type, id: h.id }, remarks: remarks || null } }))}>
-      {a.holder && <p className="text-sm text-slate-600">Currently with {a.holder}. The current assignment is closed and a new one opened.</p>}
-      <HolderPicker value={h} onChange={setH} />
-      <Field label="Remarks"><textarea className="input" value={remarks} onChange={(e) => setRemarks(e.target.value)} /></Field>
-    </FormModal>
   );
 }
 

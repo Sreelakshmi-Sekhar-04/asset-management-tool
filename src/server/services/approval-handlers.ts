@@ -1,8 +1,7 @@
 import type { ApprovalAction, ApprovalRequest, Prisma } from '@prisma/client';
 import type { Actor } from '../actor';
-import { execAssign, execCheckIn, execBulk, type BulkPayload } from './lifecycle';
+import { execAssign, execCheckIn, execBulk, execTransfer, type BulkPayload } from './lifecycle';
 import { bulkAddAssets, createAsset } from './assets';
-import { onTransferApproved, onTransferRejected, onTransferCancelled } from './transfers';
 import { holderName } from './movement';
 
 type T = Prisma.TransactionClient;
@@ -23,11 +22,16 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
       for (const a of pl.assets ?? []) await createAsset(initiator, a, { db: t, skipApproval: true, approverName: approvers });
     },
   },
+  // Assign covers both destinations the asset register offers: an employee / department holder,
+  // and a location, which is a transfer (op: 'transfer').
   ASSIGN: {
     async execute(t, initiator, req, approvers) {
-      const pl = p<{ assetId?: string; assetIds?: string[]; holder: { type: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION'; id: string }; remarks?: string }>(req);
+      const pl = p<{ op?: string; assetId?: string; assetIds?: string[]; holder?: { type: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION'; id: string }; toLocationId?: string; remarks?: string }>(req);
       const assets = await t.asset.findMany({ where: { id: { in: pl.assetIds ?? [pl.assetId!] } }, orderBy: { assetCode: 'asc' } });
-      for (const asset of assets) await execAssign(t, initiator, asset, pl.holder, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
+      for (const asset of assets) {
+        if (pl.op === 'transfer') await execTransfer(t, initiator, asset, pl.toLocationId!, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
+        else await execAssign(t, initiator, asset, pl.holder!, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
+      }
       void holderName;
     },
   },
@@ -45,25 +49,15 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
   },
   RETIRE: {
     async execute(t, initiator, req, approvers) {
-      const pl = p<BulkPayload & { exceptionIds?: string[] }>(req);
-      if (pl.exceptionIds?.length) {
-        const { forceToStock } = await import('./transfers');
-        await forceToStock(t, initiator, await t.asset.findMany({ where: { id: { in: pl.assetIds } } }), pl.reason ?? 'Written off');
-      }
-      await execBulk(t, initiator, { ...pl, op: 'retire' }, undefined, { approvalId: req.id, approverName: approvers });
-      if (pl.exceptionIds?.length) {
-        const { closeWrittenOffExceptions } = await import('./transfers');
-        await closeWrittenOffExceptions(t, initiator, pl.exceptionIds, approvers);
-      }
-    },
-    async onRejected(t, actor, req) {
-      const pl = p<{ exceptionIds?: string[] }>(req);
-      if (pl.exceptionIds?.length) void actor; // exceptions remain open for another resolution
+      await execBulk(t, initiator, { ...p<BulkPayload>(req), op: 'retire' }, undefined, { approvalId: req.id, approverName: approvers });
     },
   },
+  // The separate transfer workflow is retired: transfers are made from the asset register and
+  // gated by ASSIGN policies. Requests raised by the old workflow were closed by the
+  // 20261006000000 migration, so nothing can reach this handler.
   TRANSFER: {
-    execute: (t, initiator, req, approvers, decider) => onTransferApproved(t, decider, req, approvers),
-    onRejected: (t, actor, req, comment) => onTransferRejected(t, actor, req, comment),
-    onCancelled: (t, actor, req) => onTransferCancelled(t, actor, req),
+    async execute() {
+      throw new Error('The separate transfer workflow has been retired; transfers are made from the asset register.');
+    },
   },
 };

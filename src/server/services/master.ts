@@ -4,6 +4,7 @@ import { prisma, tx, type Db } from '@/lib/db';
 import { conflict, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit, diff } from '../audit';
+import { departmentScope } from '../scope';
 import { getSettings, invalidateSettings, DEFAULT_SETTINGS, type Settings } from '../settings';
 
 // ── Categories (FR-CFG-02) ──
@@ -59,15 +60,21 @@ export async function updateCategory(actor: Actor, id: string, input: unknown) {
 // ── Departments (FR-CFG-04) ──
 export const departmentInput = z.object({ name: z.string().trim().min(1).max(120), active: z.boolean().optional() });
 
-export async function listDepartments(includeInactive = false) {
-  return prisma.department.findMany({ where: includeInactive ? {} : { active: true }, orderBy: { name: 'asc' }, include: { _count: { select: { employees: true } } } });
+/** Only the departments of the selected organization (plus any shared ones). */
+export async function listDepartments(actor: Actor, includeInactive = false) {
+  return prisma.department.findMany({
+    where: { AND: [departmentScope(actor), includeInactive ? {} : { active: true }] },
+    orderBy: { name: 'asc' },
+    include: { _count: { select: { employees: true } } },
+  });
 }
 
 export async function createDepartment(actor: Actor, input: unknown) {
   const data = departmentInput.parse(input);
   return tx(async (t) => {
     if (await t.department.findFirst({ where: { name: { equals: data.name, mode: 'insensitive' } } })) throw conflict(`Department "${data.name}" already exists.`);
-    const d = await t.department.create({ data: { name: data.name } });
+    // A new department belongs to the organization the caller is working in.
+    const d = await t.department.create({ data: { name: data.name, organizationId: actor.orgId } });
     await audit(t, actor, { action: 'DEPARTMENT_CREATED', entityType: 'Department', entityId: d.id, entityLabel: d.name, after: d });
     return d;
   });

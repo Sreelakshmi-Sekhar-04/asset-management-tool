@@ -59,7 +59,7 @@ export default function AssetRegister() {
     { key: 'status', header: 'Status', sortable: true, className: 'align-middle', render: (r) => (
       <span className="flex flex-col items-start gap-1">
         <AssetStatus s={r.status} />
-        {r.openTransfer && <Link href={`/transfers/${r.openTransfer.id}`} className="hover:no-underline"><Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge></Link>}
+        {r.openTransfer && <Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge>}
         {r.flags.length > 0 && <Flags flags={r.flags} />}
       </span>
     ) },
@@ -67,10 +67,6 @@ export default function AssetRegister() {
   ];
   const cols = baseCols.map((c) => ({ ...c, filter: filters[c.key] }));
 
-  const toTransfer = () => {
-    sessionStorage.setItem('transfer-selection', JSON.stringify({ ...selPayload(), count }));
-    router.push('/transfers/new?from=selection');
-  };
   const labels = () => {
     if (sel.mode !== 'ids') { toast('Labels are generated for explicitly selected assets (up to 2,000).', 'err'); return; }
     setLabelsOpen(true);
@@ -86,15 +82,14 @@ export default function AssetRegister() {
 
   return (
     <div>
-      <PageHeader title="Asset register" subtitle={me.isBranch ? `Assets at ${me.scopeName}` : undefined}
+      <PageHeader title="Asset register" subtitle={me.isBranch ? `Assets at ${me.scopeName}` : me.organization ? `Assets of ${me.organization.name}` : undefined}
         actions={<>
           <Link href="/scan" className="btn">Scan asset</Link>
           {me.isIT && <button className="btn btn-primary" onClick={() => setRegisterOpen(true)}>Register asset</button>}
         </>} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          {me.isIT && <button className="btn btn-sm btn-primary" onClick={() => setAssignOpen(true)}>Assign {count}</button>}
-          <button className={me.isIT ? 'btn btn-sm' : 'btn btn-sm btn-primary'} onClick={toTransfer}>Transfer {count}</button>
+          {me.isIT && <button className="btn btn-sm btn-primary" onClick={() => setAssignOpen(true)}>{count > 1 ? `Assign / transfer ${count}` : 'Assign'}</button>}
           <button className="btn btn-sm" onClick={labels}>Print labels</button>
           {me.isIT && <>
             <button className="btn btn-sm" onClick={() => { setBulk('CHECK_IN'); setReason(''); }}>Check in</button>
