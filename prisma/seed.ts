@@ -1,7 +1,7 @@
 /**
  * DEVELOPMENT / UAT SEED DATA — NOT FOR PRODUCTION.
  *
- * Loads the small demo dataset: at most 5 records of each kind (5 users, 5 locations,
+ * Loads the small demo dataset: about 5 records of each kind (3 users, 5 Kerala branches,
  * 5 departments, 5 categories, 5 employees, 5 assets with their warranty renewals and
  * 5 transfers, one in each state). See scripts/demo-data.ts.
  * For a large organisation to test volume and load, use `npm run db:seed:large` instead.

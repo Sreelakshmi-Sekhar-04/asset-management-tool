@@ -8,7 +8,8 @@ import { DuplicateNotice } from '@/components/asset-form';
 import { CameraScanner } from '@/components/camera-scanner';
 import { DocumentsPanel } from '@/components/documents';
 import { TaskStatus } from '@/components/badges';
-import { DataTable, FilterSelect, SearchBox, useListState } from '@/components/list';
+import { DataTable, useListState } from '@/components/list';
+import { useColumnFilters } from '@/components/list-filters';
 import { useMe } from '@/components/me';
 import { CategorySelect, EmployeePicker } from '@/components/pickers';
 import { useScannerAdvance } from '@/components/scanner';
@@ -32,6 +33,7 @@ export default function TaskPage() {
   const toast = useToast();
   const { confirm, node } = useConfirm();
   const ls = useListState({ tab: 'checklist', pageSize: '100' });
+  const cf = useColumnFilters(ls);
   const tab = ls.get('tab');
   const { data: t, error, reload } = useApi<Task>(`/api/verification/tasks/${id}`);
   const lineQuery = qs({ search: ls.get('search'), result: ls.get('result'), inTransit: tab === 'transit' ? 'true' : undefined, page: ls.page, pageSize: ls.pageSize });
@@ -57,13 +59,13 @@ export default function TaskPage() {
   };
 
   const columns = [
-    { key: 'assetCode', header: 'Asset ID', className: 'whitespace-nowrap', render: (l: Line) => <Link href={`/assets/${l.assetId}`}>{l.assetCode}</Link> },
+    { key: 'assetCode', header: 'Asset ID', className: 'whitespace-nowrap', filter: cf.text('search', 'Asset', 'Asset ID, serial or hostname contains…'), render: (l: Line) => <Link href={`/assets/${l.assetId}`}>{l.assetCode}</Link> },
     { key: 'item', header: 'Item', render: (l: Line) => <div><div>{l.snapshot.make} {l.snapshot.model}</div><div className="text-xs text-slate-500">{l.snapshot.category}</div></div> },
     { key: 'serial', header: 'Serial / hostname', render: (l: Line) => <div className="text-xs"><div>{l.snapshot.serialNumber ?? '—'}</div><div className="text-slate-500">{l.snapshot.hostname ?? ''}{l.snapshot.ipAddress ? ` · ${l.snapshot.ipAddress}` : ''}</div></div> },
     { key: 'holder', header: tab === 'transit' ? 'Transfer' : 'Holder', render: (l: Line) => <span className="text-xs">{tab === 'transit' ? l.snapshot.transfer : l.snapshot.holder ?? '—'}</span> },
     ...(tab === 'transit' ? [] : [
       {
-        key: 'result', header: 'Result', render: (l: Line) => (
+        key: 'result', header: 'Result', filter: cf.option('result', 'Result', [{ value: 'UNMARKED', label: 'Unmarked' }, { value: 'PRESENT', label: 'Present' }, { value: 'MISSING', label: 'Missing' }, { value: 'WRONG_DETAILS', label: 'Wrong details' }], 'Any result'), render: (l: Line) => (
           <div className="space-y-1">
             {t.canEdit ? (
               <div className="flex gap-1">
@@ -100,12 +102,12 @@ export default function TaskPage() {
     <div className="space-y-4">
       {node}
       <PageHeader
-        back={{ href: isIT ? `/verification/campaigns/${t.campaign.id}` : '/verification', label: isIT ? t.campaign.name : 'Verification' }}
+        back={{ href: isIT ? `/campaigns/${t.campaign.id}` : '/campaigns', label: isIT ? t.campaign.name : 'Campaigns' }}
         title={t.location.namePath}
         subtitle={<span className="flex flex-wrap items-center gap-2">{t.campaign.name} · due {fmtDateOnly(t.campaign.dueDate)} <TaskStatus s={t.status} />{t.overdue && <Badge tone="red">Overdue</Badge>}</span>}
         actions={<>
           {t.canEdit && s.unmarked > 0 && <button className="btn" onClick={async () => { if (await confirm(`Mark all ${s.unmarked} unmarked asset(s) as Present? Only do this after physically seeing each one.`)) act('mark-all', 'Unmarked assets marked present'); }}>Mark all unmarked present</button>}
-          {t.canEdit && <button className="btn btn-primary" onClick={async () => { if (await confirm('Submit this verification? The checklist locks and IT reviews the discrepancies.')) act('submit', 'Submitted to IT'); }}>Submit</button>}
+          {t.canEdit && <button className="btn btn-primary" onClick={async () => { if (await confirm('Submit this campaign task? The checklist locks and IT reviews the discrepancies.')) act('submit', 'Submitted to IT'); }}>Submit</button>}
           {reviewing && <button className="btn" onClick={() => setReopenOpen(true)}>Reopen</button>}
           {reviewing && <button className="btn btn-primary" disabled={s.pendingReview > 0} title={s.pendingReview ? 'Review every discrepancy first' : undefined} onClick={() => setSignOpen(true)}>Sign off</button>}
           {t.status === 'SIGNED_OFF' && <><button className="btn" onClick={() => download(`/api/verification/tasks/${id}/verified-stock?format=xlsx`).catch((e) => toast(e.message, 'err'))}>Verified stock (Excel)</button><button className="btn" onClick={() => download(`/api/verification/tasks/${id}/verified-stock?format=csv`).catch((e) => toast(e.message, 'err'))}>CSV</button></>}
@@ -163,13 +165,9 @@ export default function TaskPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          <div className="flex flex-wrap gap-2">
-            <SearchBox value={ls.get('search')} onChange={(v) => ls.set('search', v)} placeholder="Asset ID, serial or hostname" />
-            {tab === 'checklist' && <FilterSelect label="Result" value={ls.get('result')} onChange={(v) => ls.set('result', v)} options={[{ value: 'UNMARKED', label: 'Unmarked' }, { value: 'PRESENT', label: 'Present' }, { value: 'MISSING', label: 'Missing' }, { value: 'WRONG_DETAILS', label: 'Wrong details' }]} />}
-          </div>
-          {tab === 'transit' && <p className="text-xs text-slate-500">These assets were in an open transfer when the checklist was generated, so they are excluded from this verification.</p>}
+          {tab === 'transit' && <p className="text-xs text-slate-500">These assets were in an open transfer when the checklist was generated, so they are excluded from this campaign.</p>}
           <DataTable columns={columns} rows={lines.data?.rows ?? []} total={lines.data?.total ?? 0} loading={lines.loading} page={ls.page} pageSize={ls.pageSize}
-            onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} />
+            onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} toolbar={cf.strip()} />
         </div>
       )}
 
@@ -178,7 +176,7 @@ export default function TaskPage() {
       <WrongDetailsModal line={wrong} taskId={id} onClose={() => setWrong(null)} onDone={refresh} />
       <ReviewModal r={review} taskId={id} onClose={() => setReview(null)} onDone={refresh} />
       <AddUnlistedModal open={addOpen} taskId={id} onClose={() => setAddOpen(false)} onDone={(dups) => { refresh(); if (dups) toast(`Added. ${dups} possible duplicate(s) found; IT will check them on review.`); }} />
-      <TextModal open={signOpen} title="Sign off verification" label="Sign-off note" submitLabel="Sign off" required={false} onClose={() => setSignOpen(false)}
+      <TextModal open={signOpen} title="Sign off campaign task" label="Sign-off note" submitLabel="Sign off" required={false} onClose={() => setSignOpen(false)}
         onSubmit={async (note) => { await api(`/api/verification/tasks/${id}/sign-off`, { body: { note } }); toast('Signed off'); refresh(); }} />
       <TextModal open={reopenOpen} title="Reopen for the branch" label="Reason (sent to the branch)" submitLabel="Reopen" required onClose={() => setReopenOpen(false)}
         onSubmit={async (reason) => { await api(`/api/verification/tasks/${id}/reopen`, { body: { reason } }); toast('Reopened'); refresh(); }} />

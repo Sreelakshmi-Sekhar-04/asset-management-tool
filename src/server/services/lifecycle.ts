@@ -296,3 +296,50 @@ export async function bulkReassign(actor: Actor, assetIds: string[], toEmployeeI
     return { reassigned: assets.length };
   }, { timeoutMs: 120_000 });
 }
+
+// ───────────── Assign many at once (asset register multi-select) ─────────────
+
+export const bulkAssignInput = z.object({
+  assetIds: z.array(z.string()).max(2000).optional(),
+  filter: z.record(z.string(), z.unknown()).optional(),
+  excludeIds: z.array(z.string()).optional(),
+  holder: holderInput,
+  remarks: z.string().trim().max(1000).optional().nullable(),
+  /** Check only: report what would be assigned, skipped or refused, and change nothing. */
+  dryRun: z.boolean().optional(),
+});
+
+type BulkAssignProblem = { ref: string; message: string };
+
+/**
+ * Assigns every selected asset to one holder in a single transaction, using the same checks,
+ * history, audit and approval policy as a single assignment. Assets already with that holder
+ * are skipped; assets that cannot be assigned (under repair, in an open transfer, retired …)
+ * are listed and left untouched while the rest are assigned.
+ */
+export async function bulkAssign(actor: Actor, input: unknown) {
+  const data = bulkAssignInput.parse(input);
+  return tx(async (t) => {
+    const assets = await resolveSelection(t, actor, data);
+    if (!assets.length) throw badRequest('No assets selected.');
+    if (assets.length > 2000) throw badRequest('At most 2,000 assets can be assigned at once.');
+    const holder: HolderRef = data.holder;
+    await validateHolder(t, actor, holder);
+    const name = await holderName(t, holder.type, holder.id);
+    const skipped: BulkAssignProblem[] = [];
+    const failed: BulkAssignProblem[] = [];
+    const ok: Asset[] = [];
+    for (const a of [...assets].sort((x, y) => x.assetCode.localeCompare(y.assetCode))) {
+      const cur = holderOf(a);
+      if (cur && cur.type === holder.type && cur.id === holder.id && a.status === 'ASSIGNED') { skipped.push({ ref: a.assetCode, message: `Already assigned to ${name}` }); continue; }
+      try { await preAssign(t, actor, a, holder); ok.push(a); } catch (e) { failed.push({ ref: a.assetCode, message: (e as Error).message }); }
+    }
+    const result = { holder: name, selected: assets.length, skipped, failed };
+    if (data.dryRun) return { ...result, assignable: ok.length, assigned: 0 };
+    if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be assigned to ${name}. Nothing was changed.`, [...failed, ...skipped]);
+    const g = await gate(t, actor, 'ASSIGN', ok, `Assign ${ok.length} asset(s) to ${name}`, { op: 'assign', assetIds: ok.map((a) => a.id), holder, remarks: data.remarks ?? null });
+    if (g) return { ...result, assignable: ok.length, assigned: 0, ...g };
+    for (const a of ok) await execAssign(t, actor, a, holder, data.remarks ?? null);
+    return { ...result, assignable: ok.length, assigned: ok.length };
+  }, { timeoutMs: 120_000 });
+}

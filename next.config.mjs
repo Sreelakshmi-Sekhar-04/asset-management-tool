@@ -12,6 +12,14 @@ const nextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ['pdfkit', 'sharp', 'exceljs', 'ldapts', 'nodemailer', 'bcryptjs'],
   experimental: { serverActions: { bodySizeLimit: '2mb' } },
+  // Verification is shown as Campaigns; old links (bookmarks, emails, stored notifications) still work.
+  async redirects() {
+    return [
+      { source: '/verification', destination: '/campaigns', permanent: false },
+      { source: '/verification/campaigns/:id', destination: '/campaigns/:id', permanent: false },
+      { source: '/verification/:path*', destination: '/campaigns/:path*', permanent: false },
+    ];
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

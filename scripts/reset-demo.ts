@@ -6,7 +6,7 @@
  *
  * Deletes ALL data (users, assets, employees, locations, transfers, audit log, history …)
  * from the database in DATABASE_URL, then creates 5 of each through the application's own
- * services: 5 users · 5 locations · 5 departments · 5 categories · 5 employees · 5 assets
+ * services: 3 users · 5 Kerala branches · 5 departments · 5 categories · 5 employees · 5 assets
  * (each with a warranty, so 5 renewables) · 5 transfers in different states.
  * Side records the services write for those (movements, audit entries, notifications) remain.
  *

@@ -14,14 +14,14 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: '', items: [{ href: '/', label: 'Dashboard' }] },
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
-    { href: '/employees', label: 'Employees' },
+    { href: '/employees', label: 'Users & Employees' },
   ] },
   { group: 'Transfers', items: [
     { href: '/transfers', label: 'Transfer register' },
   ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
-    { href: '/verification', label: 'Verification' },
+    { href: '/campaigns', label: 'Campaigns' },
     { href: '/renewals', label: 'Renewals' },
   ] },
   { group: 'Insight', items: [
@@ -31,7 +31,6 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/audit', label: 'Audit log', roles: IT },
   ] },
   { group: 'Administration', items: [
-    { href: '/admin/users', label: 'Users', roles: AD },
     { href: '/admin/locations', label: 'Locations', roles: AD },
     { href: '/admin/master-data', label: 'Categories & departments', roles: AD },
     { href: '/admin/asset-ids', label: 'Asset IDs & labels', roles: AD },

@@ -19,7 +19,7 @@ cp .env.example .env
 #   APP_URL        → http://localhost:3000
 
 npm run db:migrate      # create the schema
-npm run db:seed         # DEVELOPMENT ONLY: 5 of each (users, locations, assets, transfers …)
+npm run db:seed         # DEVELOPMENT ONLY: ~5 of each, 3 users, Kerala locations only
 npm run dev             # web app on http://localhost:3000 plus the worker
 ```
 
@@ -31,7 +31,7 @@ Every variable is described in [`.env.example`](../.env.example). Required: `DAT
 
 ## Demo data (development only)
 
-`npm run db:seed` loads a small demo set, at most 5 records of each kind: 5 users (an Administrator, 2 IT Operators, 2 branch users), 5 locations, 5 departments, 5 categories, 5 employees, 5 assets (with 5 warranty renewals) and 5 transfers, one in each state. It skips a database that already has users.
+`npm run db:seed` loads a small demo set, about 5 records of each kind: 3 users (an Administrator, an IT Operator and a Kochi branch user, each linked to their employee record), 5 Kerala branches (Kochi, Thiruvananthapuram, Kozhikode, Thrissur, Kollam under South › Kerala), 5 departments, 5 categories, 5 employees, 5 assets (with 5 warranty renewals) and 5 transfers, one in each state. All demo locations are in Kerala. It skips a database that already has users.
 
 For a large realistic organisation (15 branches, ~150 assets, approval policies, a verification campaign), run `npm run db:seed:large` on an empty database instead. The volume and load tests below use it.
 

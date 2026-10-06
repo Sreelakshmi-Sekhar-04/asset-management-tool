@@ -6,6 +6,7 @@ import { api, useApi } from '@/components/api';
 import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
 import { AssetStatus, Flags } from '@/components/badges';
+import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
 import { Dash, HolderCell, LocationCell, useAssetColumnFilters, WarrantyCell } from '@/components/asset-list-parts';
 import { ActiveFilters } from '@/components/column-filter';
 import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
@@ -30,6 +31,7 @@ export default function AssetRegister() {
   const [disposal, setDisposal] = useState('SCRAPPED');
   const [registerOpen, setRegisterOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const total = data?.total ?? 0;
   const count = selectionCount(sel, total);
   const { filters, chips } = useAssetColumnFilters(ls);
@@ -91,7 +93,8 @@ export default function AssetRegister() {
         </>} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <button className="btn btn-sm btn-primary" onClick={toTransfer}>Transfer {count}</button>
+          {me.isIT && <button className="btn btn-sm btn-primary" onClick={() => setAssignOpen(true)}>Assign {count}</button>}
+          <button className={me.isIT ? 'btn btn-sm' : 'btn btn-sm btn-primary'} onClick={toTransfer}>Transfer {count}</button>
           <button className="btn btn-sm" onClick={labels}>Print labels</button>
           {me.isIT && <>
             <button className="btn btn-sm" onClick={() => { setBulk('CHECK_IN'); setReason(''); }}>Check in</button>
@@ -107,6 +110,8 @@ export default function AssetRegister() {
         selection={sel} onSelection={setSel} empty="No assets match these filters."
         toolbar={<ActiveFilters chips={chips} onClearAll={ls.clear} right={<SavedFiltersMenu page="assets" query={ls.query} onApply={(q) => router.replace(`/assets?${q}`)} />} />} />
       <RegisterAssetDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
+      <BulkAssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} count={count} selection={selPayload}
+        onDone={(r) => { toast(bulkAssignMessage(r)); setSel(emptySelection()); reload(); }} />
       <PrintLabelsDialog open={labelsOpen} onClose={() => setLabelsOpen(false)} assetIds={sel.mode === 'ids' ? [...sel.ids] : []} />
       <FormModal open={!!bulk} onClose={() => setBulk('')} danger={bulk === 'RETIRE'}
         title={{ REPAIR: 'Send to repair', REPAIR_DONE: 'Complete repair', RETIRE: 'Retire assets', CHECK_IN: 'Check in', '': '' }[bulk]}

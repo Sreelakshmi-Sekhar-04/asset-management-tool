@@ -5,7 +5,8 @@ import { Suspense, useState } from 'react';
 import { fmtDateTime } from '@/lib/format';
 import { api, qs, useApi } from '@/components/api';
 import { countsText, RunStatus, type RunCounts } from '@/components/integration-bits';
-import { DataTable, FilterSelect, useListState } from '@/components/list';
+import { DataTable, useListState } from '@/components/list';
+import { useColumnFilters } from '@/components/list-filters';
 import { useMe } from '@/components/me';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, Stat, Tabs } from '@/components/ui';
 
@@ -22,6 +23,7 @@ function Inner() {
   const [add, setAdd] = useState(false);
   const [n, setN] = useState({ key: '', name: '', kind: 'DEVICE' });
   const h = health.data ?? [];
+  const f = useColumnFilters(ls);
   const tot = (k: 'unmatchedOpen' | 'conflictsOpen') => h.reduce((s, x) => s + x[k], 0);
   return (
     <div className="space-y-4">
@@ -59,16 +61,13 @@ function Inner() {
       ))}
       {tab === 'runs' && (
         <>
-          <div className="flex gap-2">
-            <FilterSelect label="Source" value={ls.get('sourceId')} onChange={(v) => ls.set('sourceId', v)} options={h.map((s) => ({ value: s.id, label: s.name }))} />
-            <FilterSelect label="Status" value={ls.get('status')} onChange={(v) => ls.set('status', v)} options={['SUCCESS', 'PARTIAL', 'FAILED', 'DUPLICATE', 'RUNNING'].map((v) => ({ value: v, label: v[0] + v.slice(1).toLowerCase() }))} />
-          </div>
           <DataTable loading={runs.loading} rows={runs.data?.rows ?? []} total={runs.data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+            toolbar={f.strip()}
             columns={[
               { key: 'startedAt', header: 'Started', className: 'whitespace-nowrap', render: (r) => <Link href={`/integrations/runs/${r.id}`}>{fmtDateTime(r.startedAt)}</Link> },
-              { key: 'source', header: 'Source', render: (r) => r.source.name },
+              { key: 'source', header: 'Source', filter: f.option('sourceId', 'Source', h.map((s) => ({ value: s.id, label: s.name })), 'All sources'), render: (r) => r.source.name },
               { key: 'mode', header: 'Mode', render: (r) => r.mode.toLowerCase() },
-              { key: 'status', header: 'Status', render: (r) => <span className="flex gap-1"><RunStatus s={r.status} />{r.acknowledgedAt && <Badge>Acknowledged</Badge>}</span> },
+              { key: 'status', header: 'Status', filter: f.option('status', 'Status', ['SUCCESS', 'PARTIAL', 'FAILED', 'DUPLICATE', 'RUNNING'].map((v) => ({ value: v, label: v[0] + v.slice(1).toLowerCase() })), 'All statuses'), render: (r) => <span className="flex gap-1"><RunStatus s={r.status} />{r.acknowledgedAt && <Badge>Acknowledged</Badge>}</span> },
               { key: 'counts', header: 'Counts', render: (r) => <span className="text-xs">{countsText(r)}</span> },
               { key: 'batchId', header: 'Batch', render: (r) => <span className="text-xs">{r.batchId ?? ''}</span> },
             ]} />

@@ -126,7 +126,7 @@ export function AssetQrCard({ id, assetCode, onPrint }: { id: string; assetCode:
         <div className="font-mono text-lg font-semibold">{assetCode}</div>
         <p className="text-xs text-slate-500">
           {settings?.qrContent === 'LINK' ? 'The code holds a link to this asset, so a phone camera opens it directly. ' : 'The code holds the Asset ID. '}
-          Scan it with the asset scanner, a USB scanner in the search box, or during verification.
+          Scan it with the asset scanner, a USB scanner in the search box, or during a campaign.
         </p>
         <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
           <button className="btn btn-sm btn-primary" onClick={onPrint}>Print label</button>

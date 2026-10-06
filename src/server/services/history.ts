@@ -12,7 +12,7 @@ const MOVEMENT_AUDITS = new Set(['ASSET_CREATED', 'ASSET_ASSIGNED', 'ASSET_REASS
 
 const AUDIT_TITLE: Record<string, string> = {
   ASSET_UPDATED: 'Details edited', APPROVAL_REQUESTED: 'Approval requested', DUPLICATE_FLAG_CLEARED: 'Duplicate flag cleared', ASSET_FLAG_CLEARED: 'Flag cleared',
-  VERIFICATION_DISCREPANCY_ACCEPTED: 'Verification discrepancy accepted', VERIFICATION_DISCREPANCY_REJECTED: 'Verification discrepancy rejected',
+  VERIFICATION_DISCREPANCY_ACCEPTED: 'Campaign discrepancy accepted', VERIFICATION_DISCREPANCY_REJECTED: 'Campaign discrepancy rejected',
   TRANSFER_LINE_RECALLED: 'Transfer line recalled', TRANSFER_EXCEPTION_RESOLVED: 'Transfer exception resolved', ASSET_ID_CHANGE_REJECTED: 'Attempt to change Asset ID rejected',
   ACCESS_DENIED: 'Access denied',
 };
