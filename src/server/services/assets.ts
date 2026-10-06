@@ -104,11 +104,12 @@ async function flagDuplicates(db: Db, actor: Actor, assetId: string, warns: Dupl
 
 // ───────────── Create (FR-REG-01) ─────────────
 
-async function validateRefs(db: Db, data: { categoryId: string; serialNumber?: string | null; locationId?: string }, existingCategoryId?: string) {
+/** checkSerial: false when the caller checks serials itself (bulk add checks each line). */
+async function validateRefs(db: Db, data: { categoryId: string; serialNumber?: string | null; locationId?: string }, existingCategoryId?: string, checkSerial = true) {
   const cat = await db.assetCategory.findUnique({ where: { id: data.categoryId } });
   if (!cat) throw badRequest('Category not found.', [{ field: 'categoryId', message: 'Unknown category' }]);
   if (!cat.active && cat.id !== existingCategoryId) throw badRequest(`Category "${cat.name}" is inactive and cannot be used for new assets.`);
-  if (cat.serialRequired && !data.serialNumber?.trim()) throw badRequest(`Serial number is required for category ${cat.name}.`, [{ field: 'serialNumber', message: `Required for ${cat.name}` }]);
+  if (checkSerial && cat.serialRequired && !data.serialNumber?.trim()) throw badRequest(`Serial number is required for category ${cat.name}.`, [{ field: 'serialNumber', message: `Required for ${cat.name}` }]);
   if (data.locationId) {
     const loc = await db.location.findUnique({ where: { id: data.locationId } });
     if (!loc || !loc.active) throw badRequest('Location not found or inactive.', [{ field: 'locationId', message: 'Unknown or inactive location' }]);
@@ -174,7 +175,7 @@ export async function bulkAddAssets(actor: Actor, input: unknown, opts: { skipAp
   if (actor.role === 'BRANCH_USER') throw forbidden();
   const data = bulkAddInput.parse(input);
   const run = async (t: Db) => {
-    const cat = await validateRefs(t, { categoryId: data.categoryId, locationId: data.locationId });
+    const cat = await validateRefs(t, { categoryId: data.categoryId, locationId: data.locationId }, undefined, false);
     const problems: { line: number; message: string }[] = [];
     const seen = new Map<string, number>();
     const allWarns: DuplicateHit[][] = [];
