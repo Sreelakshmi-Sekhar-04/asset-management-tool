@@ -39,12 +39,14 @@ const dt = (v: unknown) => (v ? fmtDateTime(v as Date) : '');
 
 function assetFilters(f: Filters): AssetFilters {
   return {
-    search: s(f, 'search'), categoryIds: list(f, 'categoryId'), statuses: list(f, 'status'), locationId: s(f, 'locationId'), holderType: s(f, 'holderType'),
+    search: s(f, 'search'), assetCode: s(f, 'assetCode'), make: s(f, 'make'), model: s(f, 'model'), serial: s(f, 'serial'), hostname: s(f, 'hostname'), holder: s(f, 'holder'),
+    categoryIds: list(f, 'categoryId'), statuses: list(f, 'status'), locationId: s(f, 'locationId'), holderType: s(f, 'holderType'),
     flag: s(f, 'flag'), warrantyWithinDays: s(f, 'warrantyWithinDays') ? Number(s(f, 'warrantyWithinDays')) : undefined,
+    warrantyExpired: s(f, 'warrantyExpired') === 'true',
   };
 }
 function transferFilters(f: Filters): TransferFilters {
-  return { status: list(f, 'status'), fromLocationId: s(f, 'fromLocationId'), toLocationId: s(f, 'toLocationId'), search: s(f, 'search'), dateFrom: s(f, 'dateFrom'), dateTo: s(f, 'dateTo'), direction: s(f, 'direction') as 'inbound' };
+  return { status: list(f, 'status'), fromLocationId: s(f, 'fromLocationId'), toLocationId: s(f, 'toLocationId'), search: s(f, 'search'), transferNo: s(f, 'transferNo'), reason: s(f, 'reason'), dateFrom: s(f, 'dateFrom'), dateTo: s(f, 'dateTo'), direction: s(f, 'direction') as 'inbound' };
 }
 
 const ASSET_COLUMNS: ExportColumn[] = [

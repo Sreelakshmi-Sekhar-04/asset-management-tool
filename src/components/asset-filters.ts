@@ -3,7 +3,7 @@ export function assetFiltersFromQuery(query: string) {
   const u = new URLSearchParams(query);
   const all = (k: string) => u.getAll(k).flatMap((v) => v.split(',')).filter(Boolean);
   const f: Record<string, unknown> = {};
-  if (u.get('search')) f.search = u.get('search');
+  for (const k of ['search', 'assetCode', 'make', 'model', 'serial', 'hostname', 'holder']) if (u.get(k)) f[k] = u.get(k);
   if (all('categoryId').length) f.categoryIds = all('categoryId');
   if (all('status').length) f.statuses = all('status');
   for (const k of ['locationId', 'regionId', 'holderType', 'holderId', 'flag']) if (u.get(k)) f[k] = u.get(k);

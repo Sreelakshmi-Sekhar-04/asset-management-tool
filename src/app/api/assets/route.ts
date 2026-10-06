@@ -5,7 +5,8 @@ function filters(url: URL): AssetFilters {
   const n = (k: string) => (q(url, k) !== undefined ? Number(q(url, k)) : undefined);
   const b = (k: string) => (q(url, k) === 'true' ? true : q(url, k) === 'false' ? false : undefined);
   return {
-    search: q(url, 'search'), categoryIds: qList(url, 'categoryId'), statuses: qList(url, 'status'), locationId: q(url, 'locationId'), regionId: q(url, 'regionId'),
+    search: q(url, 'search'), assetCode: q(url, 'assetCode'), make: q(url, 'make'), model: q(url, 'model'), serial: q(url, 'serial'), hostname: q(url, 'hostname'), holder: q(url, 'holder'),
+    categoryIds: qList(url, 'categoryId'), statuses: qList(url, 'status'), locationId: q(url, 'locationId'), regionId: q(url, 'regionId'),
     holderType: q(url, 'holderType'), holderId: q(url, 'holderId'), warrantyWithinDays: n('warrantyWithinDays'), warrantyExpired: b('warrantyExpired'),
     flag: q(url, 'flag'), hasOpenTransfer: b('hasOpenTransfer'),
   };
