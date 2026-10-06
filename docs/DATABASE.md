@@ -58,6 +58,20 @@ Besides the foreign-key and unique indexes, there are indexes on the columns lis
 
 To add one during development: edit `schema.prisma`, then run `npm run db:migrate:dev -- --name <what_changed>` and commit the new folder.
 
+Never use `prisma db push` on a database you later migrate: it changes tables without recording a migration, so the next `npm run db:migrate` fails with "already exists".
+
+### Recovering a failed migration
+
+If `npm run db:migrate` stops with `P3018` on `20261005000000_asset_id_format` ("column "code" of relation "asset_categories" already exists"), the database was partly changed outside migrations. Back up first (`pg_dump -Fc`), then run the re-runnable copy of that migration in `prisma/repair/` and mark it applied. Nothing existing is changed or deleted.
+
+```sh
+npx prisma migrate resolve --rolled-back 20261005000000_asset_id_format
+npx prisma db execute --file prisma/repair/20261005000000_asset_id_format.sql --schema prisma/schema.prisma
+npx prisma migrate resolve --applied 20261005000000_asset_id_format
+npm run db:migrate
+npx prisma generate
+```
+
 ## Backups and retention
 
 - Back up both the database (`pg_dump -Fc`) and the `STORAGE_DIR` volume. The Compose stack includes a nightly database dump kept for 14 days ([DEPLOYMENT.md](DEPLOYMENT.md)).
