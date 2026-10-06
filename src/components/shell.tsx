@@ -15,7 +15,6 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
     { href: '/scan', label: 'Scan asset' },
-    { href: '/assets/new', label: 'Register asset', roles: IT },
     { href: '/assets/scan-register', label: 'Scan to register', roles: IT },
     { href: '/assets/bulk-add', label: 'Bulk add', roles: IT },
     { href: '/imports', label: 'Import', roles: IT },
@@ -23,7 +22,6 @@ const NAV: { group: string; items: Item[] }[] = [
   ] },
   { group: 'Transfers', items: [
     { href: '/transfers', label: 'Transfer register' },
-    { href: '/transfers/new', label: 'New transfer' },
     { href: '/transfers/inbox', label: 'Inbound / receive' },
     { href: '/transfers/exceptions', label: 'Exceptions' },
   ] },

@@ -2,20 +2,18 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { fmtDateOnly } from '@/lib/format';
-import { STATUS_LABEL } from '@/lib/labels';
 import { api, download, useApi } from '@/components/api';
 import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
 import { AssetStatus, Flags } from '@/components/badges';
-import { DataTable, emptySelection, FilterSelect, SavedFilters, SearchBox, selectionCount, useListState, type Column, type Selection } from '@/components/list';
+import { AssetFilterBar, Dash, HolderCell, LocationCell, WarrantyCell } from '@/components/asset-list-parts';
+import { DataTable, emptySelection, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
-import { CategorySelect, LocationSelect } from '@/components/pickers';
 import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
 export interface AssetRow {
   id: string; assetCode: string; legacyTag: string | null; category: string; make: string; model: string; serialNumber: string | null; hostname: string | null; ipAddress: string | null;
-  status: string; location: string | null; holder: string | null; warrantyEnd: string | null; flags: string[]; openTransfer: { id: string; transferNo: string; status: string; toLocation: string } | null;
+  status: string; location: string | null; holderType: string | null; holder: string | null; warrantyEnd: string | null; flags: string[]; openTransfer: { id: string; transferNo: string; status: string; toLocation: string } | null;
 }
 
 export default function AssetRegister() {
@@ -35,16 +33,32 @@ export default function AssetRegister() {
   const selPayload = () => (sel.mode === 'ids' ? { assetIds: [...sel.ids] } : { filter: assetFiltersFromQuery(ls.query), excludeIds: [...sel.exclude] });
 
   const cols: Column<AssetRow>[] = [
-    { key: 'assetCode', header: 'Asset ID', sortable: true, render: (r) => <Link href={`/assets/${r.id}`} className="font-medium">{r.assetCode}</Link> },
-    { key: 'category', header: 'Category', sortable: true },
-    { key: 'make', header: 'Make / model', sortable: true, render: (r) => <span>{r.make} {r.model}{r.legacyTag && <span className="block text-xs text-slate-500">Legacy {r.legacyTag}</span>}</span> },
-    { key: 'serialNumber', header: 'Serial', sortable: true, render: (r) => r.serialNumber ?? '—' },
-    { key: 'hostname', header: 'Hostname / IP', sortable: true, render: (r) => <span>{r.hostname ?? '—'}{r.ipAddress && <span className="block text-xs text-slate-500">{r.ipAddress}</span>}</span> },
-    { key: 'location', header: 'Location', sortable: true, render: (r) => <span className="text-xs">{r.location ?? '—'}</span> },
-    { key: 'holder', header: 'Holder', render: (r) => r.holder ?? '—' },
-    { key: 'status', header: 'Status', sortable: true, render: (r) => <span className="flex flex-col gap-1"><AssetStatus s={r.status} />{r.openTransfer && <Link href={`/transfers/${r.openTransfer.id}`}><Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge></Link>}</span> },
-    { key: 'warrantyEnd', header: 'Warranty end', sortable: true, render: (r) => fmtDateOnly(r.warrantyEnd) },
-    { key: 'flags', header: 'Flags', render: (r) => <Flags flags={r.flags} /> },
+    { key: 'assetCode', header: 'Asset ID', sortable: true, className: 'align-middle', render: (r) => (
+      <span className="block whitespace-nowrap">
+        <Link href={`/assets/${r.id}`} className="font-semibold">{r.assetCode}</Link>
+        <span className="block text-xs text-slate-500">{r.category}</span>
+        {r.legacyTag && <span className="block text-[11px] text-slate-400">Legacy {r.legacyTag}</span>}
+      </span>
+    ) },
+    { key: 'make', header: 'Make', sortable: true, className: 'align-middle', render: (r) => <span className="whitespace-nowrap text-slate-600">{r.make}</span> },
+    { key: 'model', header: 'Model', sortable: true, className: 'align-middle', render: (r) => <span className="block min-w-[6.5rem] font-medium text-slate-900">{r.model}</span> },
+    { key: 'serialNumber', header: 'Serial no.', sortable: true, className: 'align-middle', render: (r) => (r.serialNumber ? <span className="whitespace-nowrap font-mono text-xs text-slate-700">{r.serialNumber}</span> : <Dash />) },
+    { key: 'hostname', header: 'Hostname', sortable: true, className: 'align-middle', render: (r) => (r.hostname || r.ipAddress ? (
+      <span className="block whitespace-nowrap">
+        {r.hostname ?? <Dash />}
+        {r.ipAddress && <span className="block font-mono text-[11px] text-slate-500">IP {r.ipAddress}</span>}
+      </span>
+    ) : <Dash />) },
+    { key: 'location', header: 'Location', sortable: true, className: 'align-middle', render: (r) => <LocationCell path={r.location} /> },
+    { key: 'holder', header: 'Assigned to', className: 'align-middle', render: (r) => <HolderCell type={r.holderType} holder={r.holder} /> },
+    { key: 'status', header: 'Status', sortable: true, className: 'align-middle', render: (r) => (
+      <span className="flex flex-col items-start gap-1">
+        <AssetStatus s={r.status} />
+        {r.openTransfer && <Link href={`/transfers/${r.openTransfer.id}`} className="hover:no-underline"><Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge></Link>}
+        {r.flags.length > 0 && <Flags flags={r.flags} />}
+      </span>
+    ) },
+    { key: 'warrantyEnd', header: 'Warranty end', sortable: true, className: 'align-middle', render: (r) => <WarrantyCell end={r.warrantyEnd} /> },
   ];
 
   const exportView = async (format: 'csv' | 'xlsx') => {
@@ -76,31 +90,19 @@ export default function AssetRegister() {
           <button className="btn" disabled={busyExport} onClick={() => exportView('csv')}>Export CSV</button>
           <button className="btn" disabled={busyExport} onClick={() => exportView('xlsx')}>Export Excel</button>
         </>} />
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <SearchBox value={ls.get('search')} onChange={(v) => ls.set('search', v)} placeholder="Asset ID, serial, hostname, IP, make, model, holder…" />
-        <CategorySelect value={ls.get('categoryId')} onChange={(v) => ls.set('categoryId', v)} className="w-auto" placeholder="Category: all" />
-        <FilterSelect label="Status" value={ls.getAll('status').length === 1 ? ls.get('status') : ''} onChange={(v) => ls.set('status', v)} options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))} />
-        <LocationSelect value={ls.get('locationId')} onChange={(v) => ls.set('locationId', v)} className="w-auto max-w-[14rem]" placeholder="Location: all" />
-        <FilterSelect label="Holder" value={ls.get('holderType')} onChange={(v) => ls.set('holderType', v)} options={[{ value: 'EMPLOYEE', label: 'Employee' }, { value: 'DEPARTMENT', label: 'Department' }, { value: 'LOCATION', label: 'Location' }, { value: 'NONE', label: 'No holder' }]} />
-        <FilterSelect label="Flag" value={ls.get('flag')} onChange={(v) => ls.set('flag', v)} options={[{ value: 'ANY', label: 'Any flag' }, { value: 'TRANSFER_EXCEPTION', label: 'Transfer exception' }, { value: 'MISSING', label: 'Missing' }, { value: 'DUPLICATE_SUSPECT', label: 'Duplicate-suspect' }]} />
-        <FilterSelect label="Warranty" value={ls.get('warrantyWithinDays') || (ls.get('warrantyExpired') ? 'expired' : '')} onChange={(v) => ls.setMany({ warrantyWithinDays: v === 'expired' ? null : v, warrantyExpired: v === 'expired' ? 'true' : null })} options={[{ value: '30', label: 'Ends ≤ 30 days' }, { value: '60', label: 'Ends ≤ 60 days' }, { value: '90', label: 'Ends ≤ 90 days' }, { value: 'expired', label: 'Expired' }]} />
-        {ls.query && <button className="btn btn-ghost btn-sm" onClick={ls.clear}>Clear filters</button>}
-      </div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <SavedFilters page="assets" query={ls.query} onApply={(q) => router.replace(`/assets?${q}`)} />
-        {count > 0 && (
-          <div className="flex flex-wrap gap-2">
-            <button className="btn btn-sm btn-primary" onClick={toTransfer}>Transfer {count}</button>
-            <button className="btn btn-sm" onClick={labels}>Print labels</button>
-            {me.isIT && <>
-              <button className="btn btn-sm" onClick={() => { setBulk('CHECK_IN'); setReason(''); }}>Check in</button>
-              <button className="btn btn-sm" onClick={() => { setBulk('REPAIR'); setReason(''); }}>Send to repair</button>
-              <button className="btn btn-sm" onClick={() => { setBulk('REPAIR_DONE'); setReason(''); }}>Repair done</button>
-              <button className="btn btn-sm" onClick={() => { setBulk('RETIRE'); setReason(''); }}>Retire</button>
-            </>}
-          </div>
-        )}
-      </div>
+      <AssetFilterBar ls={ls} onApplySaved={(q) => router.replace(`/assets?${q}`)} />
+      {count > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button className="btn btn-sm btn-primary" onClick={toTransfer}>Transfer {count}</button>
+          <button className="btn btn-sm" onClick={labels}>Print labels</button>
+          {me.isIT && <>
+            <button className="btn btn-sm" onClick={() => { setBulk('CHECK_IN'); setReason(''); }}>Check in</button>
+            <button className="btn btn-sm" onClick={() => { setBulk('REPAIR'); setReason(''); }}>Send to repair</button>
+            <button className="btn btn-sm" onClick={() => { setBulk('REPAIR_DONE'); setReason(''); }}>Repair done</button>
+            <button className="btn btn-sm" onClick={() => { setBulk('RETIRE'); setReason(''); }}>Retire</button>
+          </>}
+        </div>
+      )}
       <ErrorBox error={error} className="mb-3" />
       <DataTable columns={cols} rows={data?.rows ?? []} total={total} loading={loading} page={ls.page} pageSize={ls.pageSize} sort={ls.sort} dir={ls.dir}
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} onSort={(k, d) => ls.setMany({ sort: k, dir: d })}
