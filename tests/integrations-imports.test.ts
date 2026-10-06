@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { POST as devicesHook } from '@/app/api/integrations/[source]/devices/route';
 import { issueApiKey, revokeApiKey, saveSource, resolveConflict } from '@/server/services/integrations';
 import { updateAsset } from '@/server/services/assets';
-import { confirmImport, importReportCsv, purgeExpiredImportReports, runCommit, runValidation, startImport } from '@/server/import/engine';
+import { confirmImport, importReportCsv, importRows, purgeExpiredImportReports, runCommit, runValidation, startImport } from '@/server/import/engine';
 import { world, type World } from './fixtures';
 import { call, rejectsWith } from './helpers';
 
@@ -93,6 +93,16 @@ describe('imports', () => {
     const j = await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(j.status).toBe('FAILED');
     expect(j.error).toMatch(/changed since the dry run/);
+  });
+
+  it('flags a serial that is already registered even when the row has other errors, and the preview rows carry the matched Asset ID', async () => {
+    const taken = await w.asset(w.A.id, { serialNumber: `TAKEN-${w.s}` });
+    const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'taken.csv', data: csv([`${w.cat.name},HP,EliteBook,TAKEN-${w.s},Nowhere ${w.s}`]) });
+    await runValidation(job.id);
+    const { rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 });
+    expect(rows[0].outcome).toBe('REJECTED');
+    expect(rows[0].messages.join(' ')).toMatch(/Unknown location.*Duplicate: serial TAKEN-.* already exists on /);
+    expect((rows[0] as { view?: { asset: { id: string } | null } }).view?.asset?.id).toBe(taken.id);
   });
 
   it('row reports are purged after the retention period, but the import log entry stays', async () => {

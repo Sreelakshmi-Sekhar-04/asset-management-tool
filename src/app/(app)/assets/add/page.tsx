@@ -4,8 +4,7 @@ import { PageHeader } from '@/components/ui';
 const WAYS = [
   { href: '/assets/new', title: 'Register one asset', when: 'Fill in the form by hand. Best for a single device or one with unusual details.' },
   { href: '/assets/scan-register', title: 'Scan to register', when: 'Scan the serial-number barcode on each device with a phone camera or a USB scanner; the rest of the details carry over to the next device.' },
-  { href: '/assets/bulk-add', title: 'Bulk add', when: 'Many devices of the same make and model: enter the common details once, then scan or type a serial per row.' },
-  { href: '/imports', title: 'Import from Excel or CSV', when: 'An existing list or a supplier’s delivery sheet. Download the template, upload it and review a dry run, row by row, before anything is saved.' },
+  { href: '/assets/bulk-add', title: 'Bulk add / Import', when: 'Many devices at once. Scan or type a serial per row for one make and model, or upload an Excel or CSV list and review a dry run, row by row, before anything is saved.' },
   { href: '/integrations/unmatched', title: 'From discovery tools', when: 'Devices reported by a connected discovery or endpoint tool that are not in the register yet. Create an asset from each one, or link it to an existing asset.' },
 ];
 
