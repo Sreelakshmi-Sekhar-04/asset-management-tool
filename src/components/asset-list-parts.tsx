@@ -1,10 +1,10 @@
 'use client';
 import clsx from 'clsx';
-import { useEffect, useState } from 'react';
 import { fmtDateOnly } from '@/lib/format';
 import { label, STATUS_LABEL } from '@/lib/labels';
-import { FilterSelect, SavedFilters, type useListState } from './list';
-import { CategorySelect, LocationSelect, useCategories, useLocations } from './pickers';
+import { type useListState } from './list';
+import { MultiOptionFilter, OptionFilter, SelectFilter, TextFilter, type ColumnFilterDef, type FilterChip } from './column-filter';
+import { LocationSelect, useCategories, useLocations } from './pickers';
 
 type ListState = ReturnType<typeof useListState>;
 
@@ -13,71 +13,86 @@ const FLAG_OPTS = [{ value: 'ANY', label: 'Any flag' }, { value: 'TRANSFER_EXCEP
 const WARRANTY_OPTS = [{ value: '30', label: 'Ends ≤ 30 days' }, { value: '60', label: 'Ends ≤ 60 days' }, { value: '90', label: 'Ends ≤ 90 days' }, { value: 'expired', label: 'Expired' }];
 const optLabel = (opts: { value: string; label: string }[], v: string) => opts.find((o) => o.value === v)?.label ?? v;
 
+type Opt = { value: string; label: string };
+
 /**
- * Asset register filters: search and the three most-used filters on one row; holder, flag and
- * warranty sit behind "More filters". Active filters show as removable chips.
+ * Asset register filters, one per column heading (Excel-style). Returns the per-column filter
+ * panels plus the chips for whatever is in effect. `search` is still honoured (older saved filters,
+ * links from elsewhere) and shows as a chip.
  */
-export function AssetFilterBar({ ls, onApplySaved }: { ls: ListState; onApplySaved: (q: string) => void }) {
-  const warranty = ls.get('warrantyWithinDays') || (ls.get('warrantyExpired') ? 'expired' : '');
-  const moreActive = [ls.get('holderType'), ls.get('flag'), warranty].filter(Boolean).length;
-  const [more, setMore] = useState(moreActive > 0);
-  const urlSearch = ls.get('search');
-  const [search, setSearch] = useState(urlSearch);
-  useEffect(() => { setSearch(urlSearch); }, [urlSearch]);
+export function useAssetColumnFilters(ls: ListState) {
   const { data: cats } = useCategories();
   const { data: locs } = useLocations();
-  const status = ls.getAll('status').length === 1 ? ls.get('status') : '';
+  const warranty = ls.get('warrantyWithinDays') || (ls.get('warrantyExpired') ? 'expired' : '');
+  const statuses = ls.getAll('status');
+  const statusOpts: Opt[] = Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }));
+  const catOpts: Opt[] = (cats ?? []).map((c) => ({ value: c.id, label: c.name }));
+  const text = (k: string, placeholder: string, hint?: string): ColumnFilterDef => ({
+    active: !!ls.get(k),
+    content: (close) => <TextFilter value={ls.get(k)} placeholder={placeholder} label={hint} onApply={(v) => ls.set(k, v)} close={close} />,
+  });
 
-  const chips: { label: string; clear: () => void }[] = [];
-  if (ls.get('search')) chips.push({ label: `“${ls.get('search')}”`, clear: () => ls.set('search', null) });
-  if (ls.get('categoryId')) chips.push({ label: `Category: ${cats?.find((c) => c.id === ls.get('categoryId'))?.name ?? '…'}`, clear: () => ls.set('categoryId', null) });
-  if (ls.getAll('status').length) chips.push({ label: `Status: ${ls.getAll('status').map((s) => label(STATUS_LABEL, s)).join(', ')}`, clear: () => ls.set('status', null) });
+  const filters: Record<string, ColumnFilterDef> = {
+    assetCode: {
+      active: !!ls.get('assetCode') || ls.getAll('categoryId').length > 0,
+      content: (close) => <>
+        <TextFilter value={ls.get('assetCode')} placeholder="Asset ID or legacy tag contains…" onApply={(v) => ls.set('assetCode', v)} close={close} />
+        <div className="border-t pt-3"><OptionFilter label="Category" value={ls.get('categoryId')} options={catOpts} allLabel="All categories" onChange={(v) => ls.set('categoryId', v)} close={close} /></div>
+      </>,
+    },
+    make: text('make', 'Make contains…'),
+    model: text('model', 'Model contains…'),
+    serialNumber: text('serial', 'Serial contains…'),
+    hostname: text('hostname', 'Hostname or IP contains…'),
+    location: {
+      active: !!ls.get('locationId'),
+      content: (close) => (
+        <SelectFilter label="Location (includes everything under it)">
+          <LocationSelect value={ls.get('locationId')} onChange={(v) => { ls.set('locationId', v); close(); }} placeholder="All locations" />
+        </SelectFilter>
+      ),
+    },
+    holder: {
+      active: !!ls.get('holder') || !!ls.get('holderType'),
+      content: (close) => <>
+        <TextFilter value={ls.get('holder')} placeholder="Name, employee code or department…" onApply={(v) => ls.set('holder', v)} close={close} />
+        <div className="border-t pt-3"><OptionFilter label="Holder type" value={ls.get('holderType')} options={HOLDER_OPTS} allLabel="Any holder" onChange={(v) => ls.set('holderType', v)} close={close} /></div>
+      </>,
+    },
+    status: {
+      active: statuses.length > 0 || !!ls.get('flag'),
+      content: (close) => <>
+        <MultiOptionFilter label="Status" values={statuses} options={statusOpts} onApply={(v) => ls.set('status', v)} close={close} />
+        <div className="border-t pt-3"><OptionFilter label="Flag" value={ls.get('flag')} options={FLAG_OPTS} allLabel="No flag filter" onChange={(v) => ls.set('flag', v)} close={close} /></div>
+      </>,
+    },
+    warrantyEnd: {
+      active: !!warranty,
+      content: (close) => (
+        <OptionFilter label="Warranty" value={warranty} options={WARRANTY_OPTS} allLabel="Any warranty"
+          onChange={(v) => ls.setMany({ warrantyWithinDays: v && v !== 'expired' ? v : null, warrantyExpired: v === 'expired' ? 'true' : null })} close={close} />
+      ),
+    },
+  };
+
+  const chips: FilterChip[] = [];
+  const chip = (k: string, name: string) => { if (ls.get(k)) chips.push({ label: `${name}: “${ls.get(k)}”`, clear: () => ls.set(k, null) }); };
+  if (ls.get('search')) chips.push({ label: `Search: “${ls.get('search')}”`, clear: () => ls.set('search', null) });
+  chip('assetCode', 'Asset ID');
+  if (ls.getAll('categoryId').length) chips.push({ label: `Category: ${ls.getAll('categoryId').map((id) => cats?.find((c) => c.id === id)?.name ?? '…').join(', ')}`, clear: () => ls.set('categoryId', null) });
+  chip('make', 'Make');
+  chip('model', 'Model');
+  chip('serial', 'Serial');
+  chip('hostname', 'Hostname');
   if (ls.get('locationId')) chips.push({ label: `Location: ${locs?.find((l) => l.id === ls.get('locationId'))?.name ?? '…'}`, clear: () => ls.set('locationId', null) });
+  chip('holder', 'Assigned to');
   if (ls.get('holderType')) chips.push({ label: `Holder: ${optLabel(HOLDER_OPTS, ls.get('holderType'))}`, clear: () => ls.set('holderType', null) });
+  if (statuses.length) chips.push({ label: `Status: ${statuses.map((st) => label(STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('status', null) });
   if (ls.get('flag')) chips.push({ label: `Flag: ${optLabel(FLAG_OPTS, ls.get('flag'))}`, clear: () => ls.set('flag', null) });
   if (warranty) chips.push({ label: `Warranty: ${optLabel(WARRANTY_OPTS, warranty)}`, clear: () => ls.setMany({ warrantyWithinDays: null, warrantyExpired: null }) });
+  if (ls.get('hasOpenTransfer')) chips.push({ label: ls.get('hasOpenTransfer') === 'true' ? 'In an open transfer' : 'Not in an open transfer', clear: () => ls.set('hasOpenTransfer', null) });
 
-  return (
-    <div className="card mb-3">
-      <div className="flex flex-wrap items-center gap-2 p-2.5">
-        <form className="relative min-w-[16rem] flex-[2_1_18rem]" onSubmit={(e) => { e.preventDefault(); ls.set('search', search.trim()); }}>
-          <span aria-hidden className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-slate-400">
-            <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 3.4 9.83l3.63 3.64a.75.75 0 1 0 1.06-1.06l-3.63-3.64A5.5 5.5 0 0 0 9 3.5ZM5 9a4 4 0 1 1 8 0 4 4 0 0 1-8 0Z" clipRule="evenodd" /></svg>
-          </span>
-          <input className="input pl-8" type="search" aria-label="Search assets" placeholder="Search Asset ID, serial, hostname, make, model, holder…"
-            value={search} onChange={(e) => { setSearch(e.target.value); if (!e.target.value) ls.set('search', null); }} onBlur={() => search.trim() !== ls.get('search') && ls.set('search', search.trim())} />
-        </form>
-        <CategorySelect value={ls.get('categoryId')} onChange={(v) => ls.set('categoryId', v)} className="w-auto min-w-[9rem] flex-1 sm:max-w-[11rem]" placeholder="All categories" />
-        <FilterSelect label="Status" value={status} onChange={(v) => ls.set('status', v)} options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))} className="min-w-[9rem] flex-1 sm:max-w-[10rem]" />
-        <LocationSelect value={ls.get('locationId')} onChange={(v) => ls.set('locationId', v)} className="w-auto min-w-[9rem] flex-1 sm:max-w-[13rem]" placeholder="All locations" />
-        <button type="button" className={clsx('btn', (more || moreActive > 0) && 'border-brand-500 text-brand-700')} aria-expanded={more} onClick={() => setMore((x) => !x)}>
-          <svg aria-hidden viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path d="M3 5.25A.75.75 0 0 1 3.75 4.5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.25Zm3 4.75a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 6 10Zm3 4.75a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 0 1.5h-.5a.75.75 0 0 1-.75-.75Z" /></svg>
-          More filters{moreActive > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[10px] font-semibold text-white">{moreActive}</span>}
-        </button>
-      </div>
-      {more && (
-        <div className="grid gap-2 border-t bg-slate-50/70 px-2.5 py-2 sm:grid-cols-3">
-          <FilterSelect label="Holder" value={ls.get('holderType')} onChange={(v) => ls.set('holderType', v)} options={HOLDER_OPTS} className="w-full" />
-          <FilterSelect label="Flag" value={ls.get('flag')} onChange={(v) => ls.set('flag', v)} options={FLAG_OPTS} className="w-full" />
-          <FilterSelect label="Warranty" value={warranty} onChange={(v) => ls.setMany({ warrantyWithinDays: v === 'expired' ? null : v, warrantyExpired: v === 'expired' ? 'true' : null })} options={WARRANTY_OPTS} className="w-full" />
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t px-2.5 py-1.5">
-        <div className="flex min-h-[1.75rem] flex-wrap items-center gap-1.5 text-xs">
-          {chips.length === 0 ? <span className="text-slate-400">Showing all assets</span> : <>
-            {chips.map((c) => (
-              <span key={c.label} className="inline-flex items-center gap-1 rounded-full border border-brand-100 bg-brand-50 py-0.5 pl-2.5 pr-1 text-brand-900">
-                {c.label}
-                <button type="button" onClick={c.clear} aria-label={`Remove ${c.label}`} className="rounded-full px-1 text-brand-700 hover:bg-brand-100">✕</button>
-              </span>
-            ))}
-            <button type="button" className="px-1 text-slate-500 underline hover:text-slate-700" onClick={ls.clear}>Clear all</button>
-          </>}
-        </div>
-        <SavedFilters page="assets" query={ls.query} onApply={onApplySaved} />
-      </div>
-    </div>
-  );
+  return { filters, chips };
 }
 
 export const Dash = () => <span className="text-slate-300">—</span>;

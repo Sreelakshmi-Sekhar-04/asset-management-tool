@@ -348,6 +348,13 @@ export async function clearFlag(actor: Actor, id: string, flag: 'MISSING' | 'TRA
 
 export interface AssetFilters {
   search?: string;
+  /** Column filters (contains, case-insensitive). */
+  assetCode?: string;
+  make?: string;
+  model?: string;
+  serial?: string;
+  hostname?: string;
+  holder?: string;
   categoryIds?: string[];
   statuses?: string[];
   locationId?: string;
@@ -374,6 +381,20 @@ export async function assetWhere(actor: Actor, f: AssetFilters): Promise<Prisma.
         { holderEmployee: { name: { contains: s, mode: 'insensitive' } } }, { holderEmployee: { employeeCode: { equals: s, mode: 'insensitive' } } },
         { holderDepartment: { name: { contains: s, mode: 'insensitive' } } },
         { category: { name: { equals: s, mode: 'insensitive' } } }, { location: { name: { equals: s, mode: 'insensitive' } } },
+      ],
+    });
+  }
+  const has = (v?: string) => ({ contains: v!.trim(), mode: 'insensitive' as const });
+  if (f.assetCode?.trim()) and.push({ OR: [{ assetCode: has(f.assetCode) }, { legacyTag: has(f.assetCode) }] });
+  if (f.make?.trim()) and.push({ make: has(f.make) });
+  if (f.model?.trim()) and.push({ model: has(f.model) });
+  if (f.serial?.trim()) and.push({ serialNumber: has(f.serial) });
+  if (f.hostname?.trim()) and.push({ OR: [{ hostname: has(f.hostname) }, { ipAddress: { contains: f.hostname.trim() } }] });
+  if (f.holder?.trim()) {
+    and.push({
+      OR: [
+        { holderEmployee: { name: has(f.holder) } }, { holderEmployee: { employeeCode: has(f.holder) } },
+        { holderDepartment: { name: has(f.holder) } }, { holderLocation: { name: has(f.holder) } },
       ],
     });
   }

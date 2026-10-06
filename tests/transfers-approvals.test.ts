@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { actorForUser, decide, savePolicy } from '@/server/services/approvals';
 import { assignAsset, bulkCheckIn, checkInAsset } from '@/server/services/lifecycle';
 import { createCategory } from '@/server/services/master';
-import { createTransfer, receive, resolveExceptions, resolveIdentifiers } from '@/server/services/transfers';
+import { createTransfer, listTransfers, receive, resolveExceptions, resolveIdentifiers } from '@/server/services/transfers';
 import { createUser } from '@/server/services/users';
 import { world, PASSWORD, type World } from './fixtures';
 import { rejectsWith } from './helpers';
@@ -48,6 +48,16 @@ describe('transfers', () => {
     await rejectsWith(resolveExceptions(w.brA.actor, { exceptionIds: [ex.id], resolution: 'LOCATED_AT_SENDER' }), 403);
     await resolveExceptions(w.it.actor, { exceptionIds: [ex.id], resolution: 'LOCATED_AT_SENDER', note: 'Found in store' });
     expect((await prisma.asset.findUniqueOrThrow({ where: { id: l2.assetId } })).flagTransferException).toBe(false);
+  });
+
+  it('the Transfer and Reason column filters find a transfer by number, Asset ID or reason text', async () => {
+    const a = await w.asset(w.A.id);
+    const r = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: `Colfilter move ${w.s}`, assetIds: [a.id] }) as T & { transfer: { transferNo: string } };
+    const ids = async (f: Parameters<typeof listTransfers>[1]) => (await listTransfers(w.it.actor, f, { skip: 0, take: 50 })).rows.map((x) => x.id);
+    expect(await ids({ reason: `colfilter MOVE ${w.s}` })).toEqual([r.transfer.id]);
+    expect(await ids({ transferNo: a.assetCode.toLowerCase() })).toEqual([r.transfer.id]);
+    expect(await ids({ transferNo: r.transfer.transferNo, reason: `Colfilter move ${w.s}` })).toEqual([r.transfer.id]);
+    expect(await ids({ transferNo: r.transfer.transferNo, reason: 'not this one' })).toEqual([]);
   });
 
   it('a branch-raised transfer waits for IT approval; the receiving branch then confirms receipt', async () => {

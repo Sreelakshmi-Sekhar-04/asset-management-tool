@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { patchOf } from '@/lib/zod';
-import { bulkAddAssets, createAsset, updateAsset } from '@/server/services/assets';
+import { bulkAddAssets, createAsset, listAssets, updateAsset } from '@/server/services/assets';
 import { retireAsset } from '@/server/services/lifecycle';
 import { updateCategory } from '@/server/services/master';
 import { updateLocation } from '@/server/services/locations';
@@ -53,6 +53,29 @@ describe('asset registration', () => {
     await updateAsset(w.brA.actor, a.id, { hostname: `BRH-${w.s}` });
     await rejectsWith(updateAsset(w.brA.actor, a.id, { make: 'HP' }), 403);
     expect(await prisma.auditLog.count({ where: { action: 'ACCESS_DENIED', entityId: a.id } })).toBe(1);
+  });
+});
+
+describe('column filters', () => {
+  it('each column filter narrows by its own field, case-insensitively, and they combine', async () => {
+    const a = await w.asset(w.A.id, { make: `Mk${w.s}`, model: 'ThinkPad T14', serialNumber: `COLF-${w.s}-1`, hostname: `colf-${w.s}-a`, ipAddress: '10.9.8.7' });
+    const b = await w.asset(w.A.id, { make: `Mk${w.s}`, model: 'Latitude 5440', serialNumber: `COLF-${w.s}-2` });
+    const ids = async (f: Parameters<typeof listAssets>[1]) => (await listAssets(w.it.actor, f, { skip: 0, take: 50 })).rows.map((r) => r.id).sort();
+    expect(await ids({ make: `mk${w.s}` })).toEqual([a.id, b.id].sort());
+    expect(await ids({ make: `mk${w.s}`, model: 'thinkpad' })).toEqual([a.id]);
+    expect(await ids({ serial: `colf-${w.s}-2` })).toEqual([b.id]);
+    expect(await ids({ hostname: '10.9.8.7', make: `Mk${w.s}` })).toEqual([a.id]);
+    expect(await ids({ assetCode: a.assetCode.toLowerCase() })).toEqual([a.id]);
+    expect(await ids({ make: `Mk${w.s}`, model: 'nothing-like-this' })).toEqual([]);
+  });
+
+  it('the Assigned to filter matches the employee name or code', async () => {
+    const a = await w.asset(w.A.id, { make: `Hold${w.s}` });
+    await prisma.asset.update({ where: { id: a.id }, data: { holderType: 'EMPLOYEE', holderEmployeeId: w.empA.id, status: 'ASSIGNED' } });
+    const ids = async (holder: string) => (await listAssets(w.it.actor, { make: `Hold${w.s}`, holder }, { skip: 0, take: 50 })).rows.map((r) => r.id);
+    expect(await ids(w.empA.employeeCode.toLowerCase())).toEqual([a.id]);
+    expect(await ids(w.empA.name.slice(0, 4))).toEqual([a.id]);
+    expect(await ids('nobody-by-this-name')).toEqual([]);
   });
 });
 

@@ -492,7 +492,7 @@ async function clearExceptionFlags(t: Db, assetIds: string[]) {
 
 // ───────────── Queries ─────────────
 
-export interface TransferFilters { status?: string[]; direction?: 'inbound' | 'outbound'; fromLocationId?: string; toLocationId?: string; search?: string; dateFrom?: string; dateTo?: string; interState?: boolean; requestedById?: string }
+export interface TransferFilters { status?: string[]; direction?: 'inbound' | 'outbound'; fromLocationId?: string; toLocationId?: string; search?: string; transferNo?: string; reason?: string; dateFrom?: string; dateTo?: string; interState?: boolean; requestedById?: string }
 
 export async function transferWhere(actor: Actor, f: TransferFilters): Promise<Prisma.TransferWhereInput> {
   const and: Prisma.TransferWhereInput[] = [transferScope(actor)];
@@ -504,6 +504,11 @@ export async function transferWhere(actor: Actor, f: TransferFilters): Promise<P
     and.push({ [rel]: { idPath: { startsWith: loc?.idPath ?? '/__none__/' } } });
   }
   if (f.search) and.push({ OR: [{ transferNo: { contains: f.search, mode: 'insensitive' } }, { reason: { contains: f.search, mode: 'insensitive' } }, { lines: { some: { assetCode: { equals: f.search.toUpperCase() } } } }] });
+  if (f.transferNo?.trim()) {
+    const t = f.transferNo.trim();
+    and.push({ OR: [{ transferNo: { contains: t, mode: 'insensitive' } }, { lines: { some: { assetCode: { equals: t.toUpperCase() } } } }] });
+  }
+  if (f.reason?.trim()) and.push({ reason: { contains: f.reason.trim(), mode: 'insensitive' } });
   if (f.dateFrom) and.push({ requestedAt: { gte: dateOnly(f.dateFrom) } });
   if (f.dateTo) and.push({ requestedAt: { lt: new Date(dateOnly(f.dateTo).getTime() + 86_400_000) } });
   if (f.interState !== undefined) and.push({ interState: f.interState });

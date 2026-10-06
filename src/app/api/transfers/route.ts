@@ -4,7 +4,7 @@ import { createTransfer, listTransfers, type TransferFilters } from '@/server/se
 function filters(url: URL): TransferFilters {
   return {
     status: qList(url, 'status'), direction: q(url, 'direction') as TransferFilters['direction'], fromLocationId: q(url, 'fromLocationId'), toLocationId: q(url, 'toLocationId'),
-    search: q(url, 'search'), dateFrom: q(url, 'dateFrom'), dateTo: q(url, 'dateTo'), interState: q(url, 'interState') === undefined ? undefined : q(url, 'interState') === 'true', requestedById: q(url, 'requestedById'),
+    search: q(url, 'search'), transferNo: q(url, 'transferNo'), reason: q(url, 'reason'), dateFrom: q(url, 'dateFrom'), dateTo: q(url, 'dateTo'), interState: q(url, 'interState') === undefined ? undefined : q(url, 'interState') === 'true', requestedById: q(url, 'requestedById'),
   };
 }
 

@@ -6,8 +6,9 @@ import { api, download, useApi } from '@/components/api';
 import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
 import { AssetStatus, Flags } from '@/components/badges';
-import { AssetFilterBar, Dash, HolderCell, LocationCell, WarrantyCell } from '@/components/asset-list-parts';
-import { DataTable, emptySelection, selectionCount, useListState, type Column, type Selection } from '@/components/list';
+import { Dash, HolderCell, LocationCell, useAssetColumnFilters, WarrantyCell } from '@/components/asset-list-parts';
+import { ActiveFilters } from '@/components/column-filter';
+import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
 import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
@@ -30,9 +31,10 @@ export default function AssetRegister() {
   const [labelsOpen, setLabelsOpen] = useState(false);
   const total = data?.total ?? 0;
   const count = selectionCount(sel, total);
+  const { filters, chips } = useAssetColumnFilters(ls);
   const selPayload = () => (sel.mode === 'ids' ? { assetIds: [...sel.ids] } : { filter: assetFiltersFromQuery(ls.query), excludeIds: [...sel.exclude] });
 
-  const cols: Column<AssetRow>[] = [
+  const baseCols: Column<AssetRow>[] = [
     { key: 'assetCode', header: 'Asset ID', sortable: true, className: 'align-middle', render: (r) => (
       <span className="block whitespace-nowrap">
         <Link href={`/assets/${r.id}`} className="font-semibold">{r.assetCode}</Link>
@@ -60,6 +62,7 @@ export default function AssetRegister() {
     ) },
     { key: 'warrantyEnd', header: 'Warranty end', sortable: true, className: 'align-middle', render: (r) => <WarrantyCell end={r.warrantyEnd} /> },
   ];
+  const cols = baseCols.map((c) => ({ ...c, filter: filters[c.key] }));
 
   const exportView = async (format: 'csv' | 'xlsx') => {
     setBusyExport(true);
@@ -90,7 +93,6 @@ export default function AssetRegister() {
           <button className="btn" disabled={busyExport} onClick={() => exportView('csv')}>Export CSV</button>
           <button className="btn" disabled={busyExport} onClick={() => exportView('xlsx')}>Export Excel</button>
         </>} />
-      <AssetFilterBar ls={ls} onApplySaved={(q) => router.replace(`/assets?${q}`)} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button className="btn btn-sm btn-primary" onClick={toTransfer}>Transfer {count}</button>
@@ -106,7 +108,8 @@ export default function AssetRegister() {
       <ErrorBox error={error} className="mb-3" />
       <DataTable columns={cols} rows={data?.rows ?? []} total={total} loading={loading} page={ls.page} pageSize={ls.pageSize} sort={ls.sort} dir={ls.dir}
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} onSort={(k, d) => ls.setMany({ sort: k, dir: d })}
-        selection={sel} onSelection={setSel} empty="No assets match these filters." />
+        selection={sel} onSelection={setSel} empty="No assets match these filters."
+        toolbar={<ActiveFilters chips={chips} onClearAll={ls.clear} right={<SavedFiltersMenu page="assets" query={ls.query} onApply={(q) => router.replace(`/assets?${q}`)} />} />} />
       <PrintLabelsDialog open={labelsOpen} onClose={() => setLabelsOpen(false)} assetIds={sel.mode === 'ids' ? [...sel.ids] : []} />
       <FormModal open={!!bulk} onClose={() => setBulk('')} danger={bulk === 'RETIRE'}
         title={{ REPAIR: 'Send to repair', REPAIR_DONE: 'Complete repair', RETIRE: 'Retire assets', CHECK_IN: 'Check in', '': '' }[bulk]}

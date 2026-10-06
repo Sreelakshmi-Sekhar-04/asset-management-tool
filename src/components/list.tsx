@@ -2,8 +2,9 @@
 import clsx from 'clsx';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, qs, useApi } from './api';
+import { ColumnFilterButton, type ColumnFilterDef } from './column-filter';
 import { Empty, Spinner, useToast } from './ui';
 
 /** List state lives in the URL, so views are shareable, restorable and exportable as-is (FR-RPT-03). */
@@ -38,7 +39,11 @@ export function useListState(defaults: Record<string, string> = {}) {
   return { get, getAll, set, setMany, query, apiQuery, page, pageSize, sort, dir, clear: () => router.replace(pathname, { scroll: false }) };
 }
 
-export interface Column<T> { key: string; header: ReactNode; render?: (row: T) => ReactNode; sortable?: boolean; className?: string }
+export interface Column<T> {
+  key: string; header: ReactNode; render?: (row: T) => ReactNode; sortable?: boolean; className?: string;
+  /** Excel-style filter shown as a funnel in the heading. */
+  filter?: ColumnFilterDef;
+}
 
 export type Selection = { mode: 'ids'; ids: Set<string> } | { mode: 'all'; exclude: Set<string> };
 export const emptySelection = (): Selection => ({ mode: 'ids', ids: new Set() });
@@ -46,11 +51,13 @@ export const selectionCount = (s: Selection, total: number) => (s.mode === 'ids'
 export const isSelected = (s: Selection, id: string) => (s.mode === 'ids' ? s.ids.has(id) : !s.exclude.has(id));
 
 export function DataTable<T extends { id?: string }>({
-  columns, rows, total, loading, page, pageSize, sort, dir, onPage, onSort, selection, onSelection, rowKey, empty, onPageSize,
+  columns, rows, total, loading, page, pageSize, sort, dir, onPage, onSort, selection, onSelection, rowKey, empty, onPageSize, toolbar,
 }: {
   columns: Column<T>[]; rows: T[]; total: number; loading?: boolean; page: number; pageSize: number; sort?: string; dir?: 'asc' | 'desc';
   onPage: (p: number) => void; onSort?: (key: string, dir: 'asc' | 'desc') => void; onPageSize?: (n: number) => void;
   selection?: Selection; onSelection?: (s: Selection) => void; rowKey?: (r: T) => string; empty?: ReactNode;
+  /** Rendered inside the card above the table (active filter chips, saved filters). */
+  toolbar?: ReactNode;
 }) {
   const key = rowKey ?? ((r: T) => r.id as string);
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -76,6 +83,7 @@ export function DataTable<T extends { id?: string }>({
   };
   return (
     <div className="card overflow-hidden">
+      {toolbar}
       {selection && onSelection && count > 0 && (
         <div className="flex flex-wrap items-center gap-2 border-b bg-brand-50 px-3 py-1.5 text-xs text-brand-900">
           <b>{count.toLocaleString('en-IN')} selected</b>
@@ -91,12 +99,15 @@ export function DataTable<T extends { id?: string }>({
             <tr>
               {selection && <th className="w-8"><input type="checkbox" aria-label="Select page" checked={allOnPage} onChange={togglePage} /></th>}
               {columns.map((c) => (
-                <th key={c.key} className={c.className}>
-                  {c.sortable && onSort ? (
-                    <button className="inline-flex items-center gap-1 uppercase" onClick={() => onSort(c.key, sort === c.key && dir === 'asc' ? 'desc' : 'asc')}>
-                      {c.header}{sort === c.key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
-                    </button>
-                  ) : c.header}
+                <th key={c.key} className={c.className} aria-sort={sort === c.key ? (dir === 'asc' ? 'ascending' : 'descending') : undefined}>
+                  <span className="inline-flex items-center gap-1">
+                    {c.sortable && onSort ? (
+                      <button className="inline-flex items-center gap-1 uppercase" onClick={() => onSort(c.key, sort === c.key && dir === 'asc' ? 'desc' : 'asc')}>
+                        {c.header}{sort === c.key ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                      </button>
+                    ) : c.header}
+                    {c.filter && <ColumnFilterButton title={typeof c.header === 'string' ? c.header : c.key} filter={c.filter} />}
+                  </span>
                 </th>
               ))}
             </tr>
@@ -171,6 +182,72 @@ export function SavedFilters({ page, query, onApply }: { page: string; query: st
             ))}
           </div>
         </details>
+      )}
+    </div>
+  );
+}
+
+/** Saved filters as one compact menu button: apply, delete, or save the current view. */
+export function SavedFiltersMenu({ page, query, onApply }: { page: string; query: string; onApply: (q: string) => void }) {
+  const { data, reload } = useApi<{ id: string; name: string; query: Record<string, string | string[]> }[]>(`/api/saved-filters${qs({ page })}`);
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    // Fixed position so the table card's overflow never clips the menu.
+    const place = () => { const r = box.current?.getBoundingClientRect(); if (r) setAt({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    const onDown = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+  const hasFilter = [...new URLSearchParams(query).keys()].some((k) => !['page', 'pageSize', 'sort', 'dir'].includes(k));
+  const apply = (f: { query: Record<string, string | string[]> }) => {
+    const u = new URLSearchParams();
+    for (const [k, v] of Object.entries(f.query)) (Array.isArray(v) ? v : [v]).forEach((x) => u.append(k, x));
+    onApply(u.toString()); setOpen(false);
+  };
+  const save = async () => {
+    const q: Record<string, string | string[]> = {};
+    const u = new URLSearchParams(query);
+    for (const k of new Set(u.keys())) { if (k === 'page') continue; const all = u.getAll(k); q[k] = all.length > 1 ? all : all[0]; }
+    await api('/api/saved-filters', { body: { page, name: name.trim(), query: q } });
+    setName(''); toast('Filter saved'); reload();
+  };
+  return (
+    <div ref={box} className="relative">
+      <button type="button" className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+        <svg aria-hidden viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5"><path d="M5 2.75A1.75 1.75 0 0 1 6.75 1h6.5A1.75 1.75 0 0 1 15 2.75V18a.75.75 0 0 1-1.18.62L10 15.9l-3.82 2.72A.75.75 0 0 1 5 18V2.75Z" /></svg>
+        Saved filters{data?.length ? ` (${data.length})` : ''} ▾
+      </button>
+      {open && at && (
+        <div className="fixed z-30 w-72 max-w-[calc(100vw-16px)] rounded-lg border bg-white p-2 text-sm shadow-lg" style={{ top: at.top, right: at.right }}>
+          {data && data.length > 0 ? (
+            <ul className="mb-2 max-h-60 overflow-y-auto">
+              {data.map((f) => (
+                <li key={f.id} className="flex items-center gap-1">
+                  <button type="button" className="min-w-0 flex-1 truncate rounded px-2 py-1 text-left hover:bg-slate-50" onClick={() => apply(f)}>{f.name}</button>
+                  <button type="button" className="rounded px-1.5 py-1 text-xs text-red-600 hover:bg-red-50" aria-label={`Delete ${f.name}`}
+                    onClick={() => api(`/api/saved-filters/${f.id}`, { method: 'DELETE' }).then(reload).catch((e) => toast(e.message, 'err'))}>Delete</button>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="mb-2 px-2 py-1 text-xs text-slate-500">No saved filters yet.</p>}
+          <form className="flex gap-1 border-t pt-2" onSubmit={(e) => { e.preventDefault(); save().catch((er) => toast(er.message, 'err')); }}>
+            <input className="input py-1 text-xs" placeholder={hasFilter ? 'Name this filter' : 'Filter a column first'} value={name} onChange={(e) => setName(e.target.value)} disabled={!hasFilter} aria-label="Filter name" />
+            <button className="btn btn-sm" disabled={!hasFilter || !name.trim()}>Save</button>
+          </form>
+        </div>
       )}
     </div>
   );
