@@ -34,29 +34,43 @@ export const transferInput = z.object({
 
 // ───────────── Selection helpers (FR-TRF-01) ─────────────
 
-/** Resolve pasted / uploaded Asset IDs or serials. Returns found assets and the tokens that did not resolve. */
-export async function resolveIdentifiers(actor: Actor, text: string, fromLocationId?: string) {
+/**
+ * Resolve pasted / uploaded Asset IDs or serials, or record ids handed over from the asset register's selection.
+ * Returns found assets, the tokens that did not resolve, and the deepest location that holds every found asset.
+ */
+export async function resolveIdentifiers(actor: Actor, text: string, fromLocationId?: string, assetIds: string[] = []) {
   // A label's QR may hold a scan link (…/scan/AST-000001); reduce each token to the identifier.
   const tokens = [...new Set(text.split(/[\s,;\t\r\n]+/).map((s) => extractAssetCode(s)).filter(Boolean))].slice(0, 20_000);
-  if (!tokens.length) return { found: [], unresolved: [], invalid: [] };
+  const ids = [...new Set(assetIds)].slice(0, 20_000);
+  if (!tokens.length && !ids.length) return { found: [], unresolved: [], invalid: [], commonLocationId: null };
   const upper = tokens.map((t) => t.toUpperCase());
   const lower = tokens.map((t) => t.toLowerCase());
   const assets = await prisma.asset.findMany({
-    where: { AND: [assetScope(actor), { OR: [{ assetCode: { in: upper } }, { serialNormalized: { in: lower } }, { legacyTagNormalized: { in: lower } }] }] },
+    where: { AND: [assetScope(actor), { OR: [{ id: { in: ids } }, { assetCode: { in: upper } }, { serialNormalized: { in: lower } }, { legacyTagNormalized: { in: lower } }] }] },
     include: { location: { select: { idPath: true, namePath: true } }, transferLines: { where: { status: { in: OPEN_LINE } }, select: { transfer: { select: { transferNo: true } } } } },
   });
   const matched = new Set<string>();
   for (const a of assets) { matched.add(a.assetCode.toUpperCase()); if (a.serialNormalized) matched.add(a.serialNormalized.toUpperCase()); if (a.legacyTagNormalized) matched.add(a.legacyTagNormalized.toUpperCase()); }
-  const unresolved = tokens.filter((t) => !matched.has(t.toUpperCase()));
+  const foundIds = new Set(assets.map((a) => a.id));
+  const unresolved = [...tokens.filter((t) => !matched.has(t.toUpperCase())), ...ids.filter((i) => !foundIds.has(i))];
   const from = fromLocationId ? await prisma.location.findUnique({ where: { id: fromLocationId } }) : null;
   const invalid: { assetCode: string; message: string }[] = [];
   const found = [];
   for (const a of assets) {
     const problem = lineProblem(a, from);
     if (problem) invalid.push({ assetCode: a.assetCode, message: problem });
-    else found.push({ id: a.id, assetCode: a.assetCode, serialNumber: a.serialNumber, make: a.make, model: a.model, status: a.status, location: a.location?.namePath });
+    else found.push({ id: a.id, assetCode: a.assetCode, serialNumber: a.serialNumber, make: a.make, model: a.model, status: a.status, location: a.location?.namePath, idPath: a.location?.idPath ?? null });
   }
-  return { found, unresolved, invalid };
+  return { found: found.map(({ idPath: _, ...f }) => f), unresolved, invalid, commonLocationId: commonLocation(found.map((f) => f.idPath)) };
+}
+
+/** The deepest location id shared by every path ('/root/child/…/'), or null when there is none. */
+function commonLocation(paths: (string | null)[]): string | null {
+  if (!paths.length || paths.some((p) => !p)) return null;
+  const split = paths.map((p) => p!.split('/').filter(Boolean));
+  let n = 0;
+  while (split.every((s) => n < s.length && s[n] === split[0][n])) n++;
+  return n ? split[0][n - 1] : null;
 }
 
 type AssetWithLoc = Asset & { location: { idPath: string; namePath: string } | null; transferLines: { transfer: { transferNo: string } }[] };

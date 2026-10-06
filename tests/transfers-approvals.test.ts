@@ -22,6 +22,19 @@ describe('transfers', () => {
     expect(r.unresolved).toEqual(['NOPE-404']);
   });
 
+  it('assets ticked in the register resolve by record id and suggest the location that holds them all', async () => {
+    const a = await w.asset(w.A.id), b = await w.asset(w.A.id);
+    const r = await resolveIdentifiers(w.it.actor, '', undefined, [a.id, b.id, 'gone-id']);
+    expect(r.found.map((f) => f.id).sort()).toEqual([a.id, b.id].sort());
+    expect(r.unresolved).toEqual(['gone-id']);
+    expect(r.commonLocationId).toBe(w.A.id);
+    const c = await w.asset(w.B.id);
+    const mixed = await resolveIdentifiers(w.it.actor, '', undefined, [a.id, c.id]);
+    const [la, lb] = await Promise.all([w.A.id, w.B.id].map((id) => prisma.location.findUniqueOrThrow({ where: { id } })));
+    const shared = la.idPath.split('/').filter(Boolean).filter((seg, i) => lb.idPath.split('/').filter(Boolean)[i] === seg);
+    expect(mixed.commonLocationId).toBe(shared.at(-1) ?? null);
+  });
+
   it('an IT-raised transfer is in transit at once, locks its assets, and moves them only on receipt', async () => {
     const a1 = await w.asset(w.A.id), a2 = await w.asset(w.A.id);
     const r = await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'Rebalance', assetIds: [a1.id, a2.id] }) as T;
