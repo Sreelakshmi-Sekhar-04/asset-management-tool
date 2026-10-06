@@ -42,6 +42,8 @@ It prints the sign-ins when it finishes. All demo accounts share one password: `
 
 To start again from an empty development database, run `npm run db:reset`. This **drops all data** in the database named by `DATABASE_URL`, so use it only on a local development database.
 
+For a small demo set instead, run `npm run db:reset-demo -- --yes`. It **deletes all data** in the database named by `DATABASE_URL` (users, assets, history and audit log included) and loads 5 users, 5 locations, 5 departments, 5 categories, 5 employees, 5 assets (with 5 warranty renewals) and 5 transfers, one in each state. Migrations, saved settings and the Asset ID counters are kept, so new Asset IDs continue after the old ones. Add `--admin-email you@company.com --admin-name "Your Name"` to make the Administrator your own email. All five accounts use the demo password (`SEED_DEMO_PASSWORD`, or `Demo#Pass2026`).
+
 ## Volume data (performance testing)
 
 ```bash
