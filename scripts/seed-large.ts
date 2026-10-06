@@ -69,7 +69,7 @@ async function main() {
   const sys: Actor = { ...SYSTEM_ACTOR, name: 'Seed' };
 
   // ── Organisation settings ──
-  await updateSettings(sys, { orgName: 'Demo Organisation Pvt Ltd', transferAgingDays: 7 });
+  await updateSettings(sys, { orgName: 'Joy Alukkas', transferAgingDays: 7 });
   invalidateSettings();
 
   // ── Users: administrators first (they own the rest of the seed) ──
@@ -87,9 +87,10 @@ async function main() {
   const branches: { id: string; name: string; state: string; region: string; code: string }[] = [];
   const regionIds: Record<string, string> = {};
   let bn = 0;
+  // The root of the tree is the organization / head quarter; regions sit beneath it.
+  const org = await createLocation(adminA, { name: 'Joy Alukkas', type: 'ORGANIZATION', parentId: null, code: 'JA-HQ' });
   for (const [region, states] of Object.entries(REGIONS)) {
-    // The root of the tree is the organization / head quarter.
-    const r = await createLocation(adminA, { name: region, type: 'ORGANIZATION', parentId: null });
+    const r = await createLocation(adminA, { name: region, type: 'REGION', parentId: org.id });
     regionIds[region] = r.id;
     for (const [state, names] of Object.entries(states)) {
       const s = await createLocation(adminA, { name: state, type: 'STATE', state, parentId: r.id });

@@ -1,9 +1,9 @@
 /**
  * DEVELOPMENT / UAT SEED DATA — NOT FOR PRODUCTION.
  *
- * Loads the small demo dataset: about 5 records of each kind (3 users, 5 Kerala branches,
- * 5 departments, 5 categories, 5 employees, 5 assets with their warranty renewals and
- * 5 transfers, one in each state). See scripts/demo-data.ts.
+ * Loads the small demo dataset: the Joy Alukkas organization and about 5 records of each kind
+ * (3 users, 5 Kerala branches, 5 departments, 5 categories, 5 employees, 5 assets with their
+ * warranty renewals, and a little assignment and transfer history). See scripts/demo-data.ts.
  * For a large organisation to test volume and load, use `npm run db:seed:large` instead.
  *
  * All demo accounts share one password, taken from SEED_DEMO_PASSWORD (default 'Demo#Pass2026').
@@ -24,7 +24,7 @@ async function main() {
     console.log('Database already has users; seed skipped. Run `npm run db:reset-demo -- --yes` to replace everything with the demo data.');
     return;
   }
-  await updateSettings({ ...SYSTEM_ACTOR, name: 'Seed' }, { orgName: 'Demo Organisation Pvt Ltd', transferAgingDays: 7 });
+  await updateSettings({ ...SYSTEM_ACTOR, name: 'Seed' }, { orgName: 'Joy Alukkas', transferAgingDays: 7 });
   invalidateSettings();
   printSignIns((await loadDemoData({ actorName: 'Seed' })).adminEmail);
 }

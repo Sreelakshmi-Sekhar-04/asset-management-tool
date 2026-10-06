@@ -53,7 +53,8 @@ export async function resolveOrg(
     const own = orgIdOfPath(user.scopeIdPath);
     return orgs.find((o) => o.id === own) ?? null;
   }
-  return orgs.find((o) => o.id === selectedId) ?? orgs.find((o) => o.active) ?? orgs[0];
+  // An inactive organization is not offered; fall back to the first active one.
+  return orgs.find((o) => o.id === selectedId && o.active) ?? orgs.find((o) => o.active) ?? orgs[0];
 }
 
 /** Refuse a cross-organization reference regardless of what the UI offered (§19). */

@@ -190,7 +190,7 @@ function History({ id }: { id: string }) {
             <li key={i} className="text-sm">
               <span className="absolute -left-1.5 mt-1.5 h-3 w-3 rounded-full border-2 border-white bg-brand-500" />
               <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{t.title}</span><span className="text-xs text-slate-500">{fmtDateTime(t.at)}</span></div>
-              <div className="text-xs text-slate-500">{t.actor ?? 'System'}{t.effectiveAt && new Date(t.effectiveAt).toDateString() !== new Date(t.at).toDateString() ? ` · effective ${fmtDateOnly(t.effectiveAt)}` : ''}{t.ref && <> · <Link href={t.ref.type === 'Transfer' ? `/transfers/${t.ref.id}` : t.ref.type === 'ApprovalRequest' ? `/approvals/${t.ref.id}` : '#'}>{t.ref.label}</Link></>}</div>
+              <div className="text-xs text-slate-500">{t.actor ?? 'System'}{t.effectiveAt && new Date(t.effectiveAt).toDateString() !== new Date(t.at).toDateString() ? ` · effective ${fmtDateOnly(t.effectiveAt)}` : ''}{t.ref && <> · {t.ref.type === 'ApprovalRequest' ? <Link href={`/approvals/${t.ref.id}`}>{t.ref.label}</Link> : t.ref.label}</>}</div>
               {t.details.length > 0 && <ul className="mt-0.5 text-xs text-slate-600">{t.details.map((d, j) => <li key={j}>{d}</li>)}</ul>}
             </li>
           ))}

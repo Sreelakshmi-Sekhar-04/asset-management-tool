@@ -14,7 +14,6 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: '', items: [{ href: '/', label: 'Dashboard' }] },
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
-    { href: '/employees', label: 'Users & Employees' },
   ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
@@ -27,9 +26,12 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/integrations', label: 'Integrations', roles: IT },
     { href: '/audit', label: 'Audit log', roles: IT },
   ] },
-  { group: 'Administration', items: [
+  // Organizations and the master data that hangs off them, then the rest of the configuration.
+  { group: 'Configuration', items: [
+    { href: '/admin/organizations', label: 'Organizations', roles: AD },
+    { href: '/admin/master-data', label: 'Departments & categories', roles: AD },
     { href: '/admin/locations', label: 'Locations', roles: AD },
-    { href: '/admin/master-data', label: 'Categories & departments', roles: AD },
+    { href: '/employees', label: 'Employees & users' },
     { href: '/admin/asset-ids', label: 'Asset IDs & labels', roles: AD },
     { href: '/admin/approval-policies', label: 'Approval policies', roles: AD },
     { href: '/admin/reminder-policies', label: 'Reminder policies', roles: AD },
@@ -144,7 +146,7 @@ function OrganizationPicker() {
   const me = useMe();
   const [busy, setBusy] = useState(false);
   if (!me.organization) return null;
-  if (!me.canSwitchOrganization || me.organizations.length < 2) {
+  if (!me.canSwitchOrganization) {
     return (
       <span className="flex items-center gap-1 text-xs text-slate-500">
         <span className="hidden sm:inline">Organization:</span>
@@ -156,7 +158,7 @@ function OrganizationPicker() {
     if (id === me.organization!.id) return;
     setBusy(true);
     try {
-      await api('/api/organizations', { body: { organizationId: id } });
+      await api('/api/organizations/select', { body: { organizationId: id } });
       window.location.reload();
     } catch { setBusy(false); }
   };

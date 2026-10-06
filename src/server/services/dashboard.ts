@@ -40,8 +40,11 @@ export async function dashboard(actor: Actor) {
   const cats = await prisma.assetCategory.findMany({ where: { id: { in: byCategoryRaw.map((c) => c.categoryId) } }, select: { id: true, name: true } });
   const cn = new Map(cats.map((c) => [c.id, c.name]));
 
-  // By region (IT) or by branch within the user's subtree (branch users).
-  const groupDepth = actor.role === 'BRANCH_USER' ? null : 1;
+  // By region (the locations directly under the selected organization) for IT, or by branch
+  // within the user's subtree for branch users. Never another organization's locations.
+  const branchView = actor.role === 'BRANCH_USER';
+  const groupPath = branchView ? actor.scopeIdPath ?? '/__none__/' : actor.orgIdPath ?? '/';
+  const groupDepth = actor.orgIdPath ? 1 : 0;
   const locRows = await prisma.$queryRawUnsafe<{ id: string; name: string; path: string; total: bigint; assigned: bigint; in_stock: bigint; repair: bigint }[]>(
     `SELECT g.id, g.name, g."namePath" AS path,
             COUNT(a.id) AS total,
@@ -51,11 +54,11 @@ export async function dashboard(actor: Actor) {
        FROM locations g
        JOIN locations l ON l."idPath" LIKE g."idPath" || '%'
        JOIN assets a ON a."locationId" = l.id AND a.status <> 'RETIRED'
-      WHERE ${groupDepth === null ? `g."idPath" LIKE $1 || '%' AND (g.type = 'BRANCH' OR g."idPath" = $1)` : `g.depth = 0`}
+      WHERE g."idPath" LIKE $1 || '%' AND ${branchView ? `(g.type = 'BRANCH' OR g."idPath" = $1)` : `g.depth = ${groupDepth}`}
       GROUP BY g.id, g.name, g."namePath"
       ORDER BY total DESC, g."namePath" ASC
       LIMIT 50`,
-    ...(groupDepth === null ? [actor.scopeIdPath ?? '/__none__/'] : []),
+    groupPath,
   );
 
   const campaigns = campaignList.filter((c) => c.status === 'ACTIVE').slice(0, 5);
@@ -66,7 +69,14 @@ export async function dashboard(actor: Actor) {
         where: { OR: [{ fromLocationId: { in: await scopedIds(actor) } }, { toLocationId: { in: await scopedIds(actor) } }] },
         orderBy: { recordedAt: 'desc' }, take: 12, include: { asset: { select: { assetCode: true } } },
       })).map((m) => ({ at: m.recordedAt, actor: m.actorName, text: `${m.asset.assetCode}: ${m.kind.replace(/_/g, ' ').toLowerCase()}${m.toLocationName ? ` → ${m.toLocationName}` : ''}${m.toHolderName ? ` (${m.toHolderName})` : ''}`, link: `/assets/${m.assetId}` }))
-    : (await prisma.auditLog.findMany({ where: { action: { notIn: ['LOGIN', 'LOGOUT', 'SESSION_TIMEOUT', 'EXPORT', 'DOCUMENT_DOWNLOADED'] } }, orderBy: { at: 'desc' }, take: 12 })).map((r) => ({ at: r.at, actor: r.actorEmail, text: `${r.action.replace(/_/g, ' ').toLowerCase()}${r.entityLabel ? `: ${r.entityLabel}` : ''}`, link: r.entityType === 'Asset' && r.entityId ? `/assets/${r.entityId}` : r.entityType === 'Transfer' && r.entityId ? `/transfers/${r.entityId}` : null }));
+    : (await prisma.auditLog.findMany({
+        where: {
+          action: { notIn: ['LOGIN', 'LOGOUT', 'SESSION_TIMEOUT', 'EXPORT', 'DOCUMENT_DOWNLOADED', 'ORGANIZATION_SELECTED'] },
+          // Only what happened in the selected organization's locations.
+          ...(actor.orgIdPath && { locationIds: { hasSome: await scopedIds(actor) } }),
+        },
+        orderBy: { at: 'desc' }, take: 12,
+      })).map((r) => ({ at: r.at, actor: r.actorEmail, text: `${r.action.replace(/_/g, ' ').toLowerCase()}${r.entityLabel ? `: ${r.entityLabel}` : ''}`, link: r.entityType === 'Asset' && r.entityId ? `/assets/${r.entityId}` : null }));
 
   const statusCount = (s: string) => byStatus.find((x) => x.status === s)?._count ?? 0;
   return {

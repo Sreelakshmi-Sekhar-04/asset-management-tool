@@ -19,7 +19,7 @@ cp .env.example .env
 #   APP_URL        → http://localhost:3000
 
 npm run db:migrate      # create the schema
-npm run db:seed         # DEVELOPMENT ONLY: 2 organizations, ~5 of each, 3 users
+npm run db:seed         # DEVELOPMENT ONLY: Joy Alukkas, ~5 of each, 3 users
 npm run dev             # web app on http://localhost:3000 plus the worker
 ```
 
@@ -31,7 +31,7 @@ Every variable is described in [`.env.example`](../.env.example). Required: `DAT
 
 ## Demo data (development only)
 
-`npm run db:seed` loads a deliberately small demo set, so the application reloads quickly: **2 organizations** (Tropicana Kochi and Tropicana Kozhikode, the head quarters), **5 locations** (3 branches under the first, 2 under the second), **5 departments** (each belonging to one organization), **5 categories**, **5 employees**, **5 assets**, **3 users** (an Administrator, an IT Operator and a branch user, each linked to their employee record) and the 5 warranty renewals those assets create. The records are split between the two organizations, so switching organization visibly changes every list. It skips a database that already has users.
+`npm run db:seed` loads a deliberately small demo set, so the application reloads quickly: **1 organization**, Joy Alukkas (the head quarter), **5 locations** (Kerala branches under it), **5 departments**, **5 categories**, **5 employees**, **5 assets**, **3 users** (an Administrator, an IT Operator and a branch user, each linked to their employee record) and the 5 warranty renewals those assets create. More organizations are added under Configuration → Organizations. It skips a database that already has users.
 
 For a large realistic organisation (15 branches, ~150 assets, approval policies, a verification campaign), run `npm run db:seed:large` on an empty database instead. The volume and load tests below use it.
 

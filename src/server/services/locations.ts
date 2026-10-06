@@ -117,9 +117,9 @@ export async function updateLocation(actor: Actor, id: string, input: unknown) {
     if (newIdPath !== loc.idPath || newNamePath !== loc.namePath) {
       await t.$executeRaw`
         UPDATE locations SET
-          "idPath" = ${newIdPath} || substr("idPath", ${loc.idPath.length + 1}),
-          "namePath" = ${newNamePath} || substr("namePath", ${loc.namePath.length + 1}),
-          "depth" = "depth" + ${newDepth - loc.depth}
+          "idPath" = ${newIdPath} || substr("idPath", ${loc.idPath.length + 1}::int),
+          "namePath" = ${newNamePath} || substr("namePath", ${loc.namePath.length + 1}::int),
+          "depth" = "depth" + ${newDepth - loc.depth}::int
         WHERE "idPath" LIKE ${loc.idPath + '%'} AND id <> ${loc.id}`;
     }
     const d = diff(loc as unknown as Record<string, unknown>, updated as unknown as Record<string, unknown>);

@@ -80,3 +80,7 @@ npm run db:migrate
 npx prisma generate
 npm run db:reset-demo -- --yes   # optional: replace all data with the small demo set
 ```
+
+### `20261006000002_joy_alukkas_headquarter`
+
+Makes Joy Alukkas the head quarter. A database whose top-level locations were regions (North, South, West from the original seed) had those regions shown as organizations; this migration creates the Joy Alukkas organization (or reuses one of that name), moves every other top-level location beneath it as a region, prefixes the location paths, attaches every department to it, and renames the application from the demo default "Demo Organisation Pvt Ltd" to Joy Alukkas. Ids, Asset IDs and history are unchanged. An empty database is left alone (the seed creates the organization), and running it again changes nothing.

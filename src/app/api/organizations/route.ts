@@ -1,30 +1,21 @@
-import { NextResponse } from 'next/server';
-import { route, body } from '@/server/http';
-import { z } from 'zod';
-import { badRequest, forbidden } from '@/lib/errors';
-import { listOrganizations, ORG_COOKIE } from '@/server/org';
-import { audit } from '@/server/audit';
-import { prisma } from '@/lib/db';
+import { route, q } from '@/server/http';
+import { listOrganizations } from '@/server/org';
+import { createOrganization, listOrganizationsWithCounts } from '@/server/services/organizations';
+import { forbidden } from '@/lib/errors';
 
-/** The organizations (head quarters) the caller can work in, and the one currently selected. */
-export const GET = route({}, async ({ actor }) => {
+/**
+ * The organizations (head quarters) the caller can work in, and the one currently selected.
+ * `?manage=true` is the Configuration → Organizations list: every organization, with counts.
+ */
+export const GET = route({}, async ({ actor, url }) => {
+  if (q(url, 'manage') === 'true') {
+    if (actor.role !== 'ADMIN') throw forbidden('Organizations are managed by Administrators.');
+    return listOrganizationsWithCounts();
+  }
   const orgs = await listOrganizations();
   const mine = actor.role === 'BRANCH_USER' ? orgs.filter((o) => o.id === actor.orgId) : orgs.filter((o) => o.active || o.id === actor.orgId);
   return { organizations: mine.map((o) => ({ id: o.id, name: o.name, active: o.active })), selectedId: actor.orgId, canSwitch: actor.role !== 'BRANCH_USER' };
 });
 
-/**
- * Choose the organization to work in. It is kept in a cookie and resolved server-side on every
- * request, so every screen keeps the same context while the user navigates (§15).
- */
-export const POST = route({}, async ({ req, actor }) => {
-  const { organizationId } = await body(req, z.object({ organizationId: z.string().min(1) }));
-  if (actor.role === 'BRANCH_USER') throw forbidden('A branch user always works in their own organization.');
-  const orgs = await listOrganizations();
-  const org = orgs.find((o) => o.id === organizationId);
-  if (!org) throw badRequest('Unknown organization.');
-  await audit(prisma, actor, { action: 'ORGANIZATION_SELECTED', entityType: 'Location', entityId: org.id, entityLabel: org.name });
-  const res = NextResponse.json({ organizationId: org.id, name: org.name });
-  res.cookies.set(ORG_COOKIE, org.id, { httpOnly: true, sameSite: 'lax', path: '/', secure: process.env.FORCE_HTTPS === 'true', maxAge: 365 * 86_400 });
-  return res;
-});
+/** Create an organization (Configuration → Organizations only). */
+export const POST = route({ roles: ['ADMIN'] }, async ({ req, actor }) => createOrganization(actor, await req.json()));

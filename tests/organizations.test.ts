@@ -9,6 +9,7 @@ import { bulkAssign } from '@/server/services/lifecycle';
 import { createLocation } from '@/server/services/locations';
 import { createEmployee } from '@/server/services/employees';
 import { resolveOrg, listOrganizations, orgIdOfPath } from '@/server/org';
+import { createOrganization, listOrganizationsWithCounts, updateOrganization } from '@/server/services/organizations';
 import { world, type World } from './fixtures';
 import { rejectsWith } from './helpers';
 
@@ -89,5 +90,40 @@ describe('organization context', () => {
     // Selecting the other organization does not let its location receive this organization's asset.
     const mine = await w.asset(w.A.id);
     await rejectsWith(bulkAssign({ ...w.it.actor, orgId: other.org.id, orgIdPath: other.org.idPath }, { assetIds: [mine.id], holder: { type: 'LOCATION', id: other.branch.id } }), 400);
+  });
+});
+
+describe('Configuration → Organizations', () => {
+  it('creates an active organization at the top of its own tree', async () => {
+    const org = await createOrganization(w.admin.actor, { name: `Joy Alukkas ${w.s}`, active: true });
+    expect(org.parentId).toBeNull();
+    expect(org.type).toBe('ORGANIZATION');
+    expect(org.active).toBe(true);
+    const listed = (await listOrganizationsWithCounts()).find((o) => o.id === org.id);
+    expect(listed).toMatchObject({ name: `Joy Alukkas ${w.s}`, active: true, locations: 0, employees: 0, assets: 0 });
+  });
+
+  it('can be renamed, and the new name carries down to every location beneath it', async () => {
+    const org = await createOrganization(w.admin.actor, { name: `Renamed Org ${w.s}` });
+    const unbound: Actor = { ...w.sys, orgId: null, orgIdPath: null, orgName: null };
+    const branch = await createLocation(unbound, { name: `Renamed Branch ${w.s}`, type: 'BRANCH', parentId: org.id });
+    await updateOrganization(w.admin.actor, org.id, { name: `Renamed Org 2 ${w.s}` });
+    expect((await prisma.location.findUniqueOrThrow({ where: { id: branch.id } })).namePath).toBe(`Renamed Org 2 ${w.s} / Renamed Branch ${w.s}`);
+  });
+
+  it('an inactive organization is not chosen as the working organization', async () => {
+    const org = await createOrganization(w.admin.actor, { name: `Inactive Org ${w.s}`, active: false });
+    expect(org.active).toBe(false);
+    const chosen = await resolveOrg(prisma, { role: 'IT_OPERATOR', scopeIdPath: null }, org.id);
+    expect(chosen?.id).not.toBe(org.id);
+  });
+
+  it('refuses to deactivate an organization that still holds assets', async () => {
+    await w.asset(w.A.id);
+    await rejectsWith(updateOrganization(w.admin.actor, w.org.id, { active: false }), 409, /still holds/);
+  });
+
+  it('only organizations are edited here, not their locations', async () => {
+    await rejectsWith(updateOrganization(w.admin.actor, w.A.id, { name: 'Nope' }), 404);
   });
 });
