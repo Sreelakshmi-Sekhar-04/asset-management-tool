@@ -25,7 +25,7 @@ This repository implements **Phase 1 only** (cuts A, B and R1 of the FRD). Procu
 cp .env.example .env              # set DATABASE_URL and ENCRYPTION_KEY (openssl rand -base64 32)
 npm install
 npm run db:migrate                # apply migrations
-npm run db:seed                   # DEVELOPMENT ONLY demo data
+npm run db:seed                   # DEVELOPMENT ONLY demo data (5 of each)
 npm run dev                       # web on http://localhost:3000 plus the background worker
 ```
 
@@ -51,7 +51,8 @@ Full instructions: [docs/SETUP.md](docs/SETUP.md).
 | `npm run build` / `npm start` | Production build and web server |
 | `npm run worker` | Background worker (imports, email, reminders, schedules, integrations) |
 | `npm run db:migrate` | Apply migrations (`prisma migrate deploy`) |
-| `npm run db:seed` | Demo data, development only |
+| `npm run db:seed` | Demo data, 5 of each, development only |
+| `npm run db:seed:large` | Large demo organisation for volume and load tests |
 | `npm run db:reset-demo -- --yes` | Deletes all data and loads 5 of each record, development only |
 | `npm run db:trim-assets -- --yes` | Keeps 5 assets and deletes the rest with their transfers, development only |
 | `npm run db:generate-volume -- --assets 20000` | Volume data for performance testing, development only |

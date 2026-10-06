@@ -69,7 +69,7 @@ export default function ScanRegister() {
   const registered = saved.filter((s): s is { id: string; assetCode: string } => 'id' in s);
   return (
     <div className="max-w-4xl space-y-4">
-      <PageHeader title="Scan to register" subtitle="Scan the serial-number barcode on the device, check the details and save. Category, make, model, location and purchase details stay filled in for the next device." back={{ href: '/assets/add', label: 'Ways to register' }} />
+      <PageHeader title="Scan to register" subtitle="Scan the serial-number barcode on the device, check the details and save. Category, make, model, location and purchase details stay filled in for the next device." back={{ href: '/assets', label: 'Asset register' }} />
       <Card title={scanned ? `Serial ${v.serialNumber}` : '1. Scan the serial number'}
         actions={scanned
           ? <button className="btn btn-sm" onClick={nextDevice}>Scan a different serial</button>
