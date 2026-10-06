@@ -15,6 +15,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force --skip-seed && tsx prisma/seed.ts",
     "db:reset-demo": "tsx scripts/reset-demo.ts",
+    "db:trim-assets": "tsx scripts/trim-assets.ts",
     "db:generate-volume": "tsx scripts/generate-volume.ts",
     "test": "vitest run",
     "test:watch": "vitest",
