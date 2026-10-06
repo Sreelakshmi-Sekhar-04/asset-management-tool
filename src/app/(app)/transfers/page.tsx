@@ -1,22 +1,43 @@
 'use client';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { label, TRANSFER_STATUS_LABEL } from '@/lib/labels';
 import { fmtDateOnly } from '@/lib/format';
-import { download, useApi } from '@/components/api';
+import { useApi } from '@/components/api';
 import { ActiveFilters, DateRangeFilter, MultiOptionFilter, OptionFilter, SelectFilter, TextFilter, type ColumnFilterDef, type FilterChip } from '@/components/column-filter';
 import { DataTable, SavedFiltersMenu, useListState } from '@/components/list';
 import { LocationSelect, useLocations } from '@/components/pickers';
 import { transferColumns, type TransferRow } from '@/components/transfer-list';
+import { ExceptionsView, InboundView } from '@/components/transfer-views';
 import { useMe } from '@/components/me';
-import { ErrorBox, PageHeader, useToast } from '@/components/ui';
+import { ErrorBox, PageHeader, Tabs } from '@/components/ui';
 
 const DIRECTION_OPTS = [{ value: 'inbound', label: 'Inbound' }, { value: 'outbound', label: 'Outbound' }];
+/** Receiving and exceptions are views of the register rather than menu entries of their own. */
+const VIEWS = [
+  { key: 'all', label: 'All transfers' },
+  { key: 'inbound', label: 'To receive' },
+  { key: 'exceptions', label: 'Exceptions' },
+];
 
 export default function Transfers() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const view = VIEWS.some((v) => v.key === sp.get('view')) ? sp.get('view')! : 'all';
+  return (
+    <div>
+      <PageHeader title="Transfer register" actions={<Link href="/transfers/new" className="btn btn-primary">New transfer</Link>} />
+      {/* Each view has its own filters, so switching starts from a clean URL. */}
+      <Tabs tabs={VIEWS} value={view} onChange={(k) => router.replace(k === 'all' ? pathname : `${pathname}?view=${k}`, { scroll: false })} />
+      {view === 'inbound' ? <InboundView /> : view === 'exceptions' ? <ExceptionsView /> : <AllTransfers />}
+    </div>
+  );
+}
+
+function AllTransfers() {
   const me = useMe();
   const router = useRouter();
-  const toast = useToast();
   const ls = useListState({ sort: 'requestedAt', dir: 'desc' });
   const { data, loading, error } = useApi<{ rows: TransferRow[]; total: number }>(`/api/transfers?${ls.apiQuery}`);
   const { data: locs } = useLocations(false, true);
@@ -68,11 +89,6 @@ export default function Transfers() {
   const cols = transferColumns().map((c) => ({ ...c, filter: filters[c.key] }));
   return (
     <div>
-      <PageHeader title="Transfer register" actions={<>
-        <Link href="/transfers/new" className="btn btn-primary">New transfer</Link>
-        <button className="btn" onClick={() => download(`/api/reports/transfer-register?${ls.query}${ls.query ? '&' : ''}format=csv`).catch((e) => toast(e.message, 'err'))}>Export CSV</button>
-        <button className="btn" onClick={() => download(`/api/reports/transfer-register?${ls.query}${ls.query ? '&' : ''}format=xlsx`).catch((e) => toast(e.message, 'err'))}>Export Excel</button>
-      </>} />
       <ErrorBox error={error} className="mb-3" />
       <DataTable columns={cols} rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} sort={ls.sort} dir={ls.dir}
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onSort={(k, d) => ls.setMany({ sort: k, dir: d })} onPageSize={(n) => ls.set('pageSize', String(n))}

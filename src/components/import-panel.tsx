@@ -13,14 +13,15 @@ interface Job { id: string; type: string; mode: string; fileName: string; status
 
 /**
  * Upload form and history for CSV / Excel imports. With assetsOnly (the "Upload Excel" tab of
- * Bulk add / Import) the type is fixed to assets and the history lists asset imports only.
+ * Bulk add / Import) the type is fixed to assets and, instead of the full history, only imports
+ * still running or waiting to be confirmed are listed, with a link to the history.
  */
 export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
   const me = useMe();
   const router = useRouter();
   const toast = useToast();
   const ls = useListState();
-  const listUrl = assetsOnly ? `/api/imports${qs({ type: 'ASSETS', page: ls.page, pageSize: ls.pageSize })}` : `/api/imports?${ls.apiQuery}`;
+  const listUrl = assetsOnly ? `/api/imports${qs({ type: 'ASSETS', pageSize: 20 })}` : `/api/imports?${ls.apiQuery}`;
   const { data, error, loading, reload } = useApi<{ rows: Job[]; total: number }>(listUrl);
   const [type, setType] = useState('ASSETS');
   const [mode, setMode] = useState('CREATE_ONLY');
@@ -72,19 +73,48 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
           <ErrorBox error={err} />
         </form>
       </Card>
-      {assetsOnly ? <h2 className="text-sm font-semibold text-slate-700">Earlier asset imports</h2>
-        : <div className="flex gap-2"><FilterSelect label="Type" value={ls.get('type')} onChange={(v) => ls.set('type', v)} options={Object.entries(IMPORT_TYPE).map(([value, label]) => ({ value, label }))} /></div>}
+      {assetsOnly ? <PendingAssetImports rows={data?.rows ?? []} error={error} /> : <>
+        <div className="flex gap-2"><FilterSelect label="Type" value={ls.get('type')} onChange={(v) => ls.set('type', v)} options={Object.entries(IMPORT_TYPE).map(([value, label]) => ({ value, label }))} /></div>
+        <ErrorBox error={error} />
+        <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No imports yet."
+          columns={[
+            { key: 'createdAt', header: 'Started', className: 'whitespace-nowrap', render: (r) => <Link href={`/imports/${r.id}`}>{fmtDateTime(r.createdAt)}</Link> },
+            { key: 'fileName', header: 'File', render: (r) => <Link href={`/imports/${r.id}`}>{r.fileName}</Link> },
+            { key: 'type', header: 'Type', render: (r) => IMPORT_TYPE[r.type] },
+            { key: 'status', header: 'Status', render: (r) => <ImportStatus s={r.status} /> },
+            { key: 'rows', header: 'Rows', render: (r) => RUNNING.includes(r.status) ? `${r.processedRows}/${r.totalRows || '…'}` : r.totalRows },
+            { key: 'counts', header: 'Result', render: (r) => <span className="text-xs">{r.counts?.total !== undefined ? `${r.counts.CREATED} new · ${r.counts.UPDATED} updated · ${r.counts.WARNING} warnings · ${r.counts.REJECTED} rejected` : ''}</span> },
+            { key: 'createdByName', header: 'By' },
+          ]} />
+      </>}
+    </div>
+  );
+}
+
+/**
+ * Asset imports that still need attention: a dry run in progress, or one waiting for "Confirm".
+ * Finished imports live in the history (/imports), kept for the audit trail and error reports.
+ */
+function PendingAssetImports({ rows, error }: { rows: Job[]; error: unknown }) {
+  const open = rows.filter((r) => RUNNING.includes(r.status) || r.status === 'VALIDATED');
+  return (
+    <div className="space-y-2">
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No imports yet."
-        columns={[
-          { key: 'createdAt', header: 'Started', className: 'whitespace-nowrap', render: (r) => <Link href={`/imports/${r.id}`}>{fmtDateTime(r.createdAt)}</Link> },
-          { key: 'fileName', header: 'File', render: (r) => <Link href={`/imports/${r.id}`}>{r.fileName}</Link> },
-          ...(assetsOnly ? [] : [{ key: 'type', header: 'Type', render: (r: Job) => IMPORT_TYPE[r.type] }]),
-          { key: 'status', header: 'Status', render: (r) => <ImportStatus s={r.status} /> },
-          { key: 'rows', header: 'Rows', render: (r) => RUNNING.includes(r.status) ? `${r.processedRows}/${r.totalRows || '…'}` : r.totalRows },
-          { key: 'counts', header: 'Result', render: (r) => <span className="text-xs">{r.counts?.total !== undefined ? `${r.counts.CREATED} new · ${r.counts.UPDATED} updated · ${r.counts.WARNING} warnings · ${r.counts.REJECTED} rejected` : ''}</span> },
-          { key: 'createdByName', header: 'By' },
-        ]} />
+      {open.length > 0 && (
+        <Card title="Waiting for you">
+          <ul className="divide-y text-sm">
+            {open.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-2 py-2">
+                <Link href={`/imports/${r.id}`} className="font-medium">{r.fileName}</Link>
+                <ImportStatus s={r.status} />
+                <span className="text-xs text-slate-500">{fmtDateTime(r.createdAt)} · {r.createdByName}</span>
+                <Link href={`/imports/${r.id}`} className="btn btn-sm ml-auto">{r.status === 'VALIDATED' ? 'Review and confirm' : 'Open'}</Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+      <p className="text-right text-sm"><Link href="/imports?type=ASSETS">Import history</Link></p>
     </div>
   );
 }

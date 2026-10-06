@@ -14,15 +14,10 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: '', items: [{ href: '/', label: 'Dashboard' }] },
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
-    { href: '/scan', label: 'Scan asset' },
-    { href: '/assets/scan-register', label: 'Scan to register', roles: IT },
-    { href: '/assets/bulk-add', label: 'Bulk add / Import', roles: IT },
     { href: '/employees', label: 'Employees' },
   ] },
   { group: 'Transfers', items: [
     { href: '/transfers', label: 'Transfer register' },
-    { href: '/transfers/inbox', label: 'Inbound / receive' },
-    { href: '/transfers/exceptions', label: 'Exceptions' },
   ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
@@ -46,6 +41,8 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/admin/emails', label: 'Email outbox', roles: AD },
   ] },
 ];
+/** Pages without a menu entry of their own, shown under the entry they are reached from. */
+const UNDER: [string, string][] = [['/scan', '/assets'], ['/imports', '/assets']];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const me = useMe();
@@ -63,10 +60,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener('itam:notifications', tick);
     return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
   }, [pathname]);
-  const isActive = (href: string) => (href === '/' ? pathname === '/' : href === '/assets/bulk-add' && pathname.startsWith('/imports') ? true : pathname === href || (pathname.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && pathname.startsWith(i.href)))));
+  const under = (p: string) => UNDER.find(([from]) => p === from || p.startsWith(`${from}/`))?.[1] ?? p;
+  const isActive = (href: string) => {
+    const p = under(pathname);
+    return href === '/' ? p === '/' : p === href || (p.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && p.startsWith(i.href))));
+  };
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); window.location.href = '/login'; };
-  // Groups fold so the menu fits the screen: the group holding the current page is always
-  // open; others open on click and stay as the user left them.
+  // Groups start folded so only the main headings show; the user opens them by hand and
+  // each browser remembers which ones are open. A folded group holding the current page
+  // keeps its heading highlighted.
   const activeGroup = NAV.find((g) => g.items.some((i) => isActive(i.href)))?.group ?? '';
   const toggleGroup = (g: string) => setExpanded((x) => {
     const n = new Set(x);
@@ -79,12 +81,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {NAV.map((g) => {
         const items = g.items.filter((i) => !i.roles || i.roles.includes(me.role));
         if (!items.length) return null;
-        const shown = !g.group || g.group === activeGroup || expanded.has(g.group);
+        const shown = !g.group || expanded.has(g.group);
+        const here = g.group === activeGroup;
         return (
           <div key={g.group}>
             {g.group && (
-              <button type="button" onClick={() => toggleGroup(g.group)} aria-expanded={shown} disabled={g.group === activeGroup}
-                className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600 disabled:cursor-default disabled:hover:text-slate-400">
+              <button type="button" onClick={() => toggleGroup(g.group)} aria-expanded={shown}
+                className={clsx('flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wider', here && !shown ? 'bg-brand-50 text-brand-700' : 'text-slate-400 hover:text-slate-600')}>
                 {g.group}<span aria-hidden className="text-[10px]">{shown ? '▾' : '▸'}</span>
               </button>
             )}

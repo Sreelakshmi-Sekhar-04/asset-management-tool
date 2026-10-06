@@ -39,7 +39,7 @@ export default function Dashboard() {
         <Stat label={d.approvals.mine ? 'My pending requests' : 'Awaiting my approval'} value={d.approvals.total} href="/approvals" tone={d.approvals.total ? 'amber' : undefined} />
         <Stat label="Open transfers" value={d.transfers.open} href="/transfers?status=PENDING_APPROVAL&status=IN_TRANSIT&status=PARTIALLY_RECEIVED" />
         <Stat label="In transit" value={d.transfers.inTransit} href="/reports/in-transit" hint={d.transfers.aging ? `${d.transfers.aging} past ${d.transfers.agingDays} days` : undefined} tone={d.transfers.aging ? 'red' : undefined} />
-        <Stat label="Open exceptions" value={d.exceptionsOpen} href="/transfers/exceptions?status=OPEN" tone={d.exceptionsOpen ? 'red' : undefined} />
+        <Stat label="Open exceptions" value={d.exceptionsOpen} href="/transfers?view=exceptions&status=OPEN" tone={d.exceptionsOpen ? 'red' : undefined} />
         <Stat label="Expiring ≤ 30 days" value={d.expiring.d30} href="/reports/expiry-outlook?withinDays=30" tone={d.expiring.d30 ? 'amber' : undefined} />
         <Stat label="Expiring ≤ 60 days" value={d.expiring.d60} href="/reports/expiry-outlook?withinDays=60" />
         <Stat label="Expiring ≤ 90 days" value={d.expiring.d90} href="/reports/expiry-outlook?withinDays=90" hint={d.expiring.expired ? `${d.expiring.expired} already expired` : undefined} />

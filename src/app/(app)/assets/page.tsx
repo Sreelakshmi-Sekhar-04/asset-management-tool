@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { api, download, useApi } from '@/components/api';
+import { api, useApi } from '@/components/api';
 import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
 import { AssetStatus, Flags } from '@/components/badges';
@@ -10,6 +10,7 @@ import { Dash, HolderCell, LocationCell, useAssetColumnFilters, WarrantyCell } f
 import { ActiveFilters } from '@/components/column-filter';
 import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
+import { RegisterAssetDialog } from '@/components/register-options';
 import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
 export interface AssetRow {
@@ -27,7 +28,7 @@ export default function AssetRegister() {
   const [bulk, setBulk] = useState<'' | 'REPAIR' | 'REPAIR_DONE' | 'RETIRE' | 'CHECK_IN'>('');
   const [reason, setReason] = useState('');
   const [disposal, setDisposal] = useState('SCRAPPED');
-  const [busyExport, setBusyExport] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const total = data?.total ?? 0;
   const count = selectionCount(sel, total);
@@ -64,10 +65,6 @@ export default function AssetRegister() {
   ];
   const cols = baseCols.map((c) => ({ ...c, filter: filters[c.key] }));
 
-  const exportView = async (format: 'csv' | 'xlsx') => {
-    setBusyExport(true);
-    try { await download(`/api/reports/asset-register?${ls.query}${ls.query ? '&' : ''}format=${format}`); } catch (e) { toast((e as Error).message, 'err'); } finally { setBusyExport(false); }
-  };
   const toTransfer = () => {
     sessionStorage.setItem('transfer-selection', JSON.stringify({ ...selPayload(), count }));
     router.push('/transfers/new?from=selection');
@@ -89,9 +86,8 @@ export default function AssetRegister() {
     <div>
       <PageHeader title="Asset register" subtitle={me.isBranch ? `Assets at ${me.scopeName}` : undefined}
         actions={<>
-          {me.isIT && <><Link href="/assets/new" className="btn btn-primary">Register asset</Link><Link href="/assets/add" className="btn">Other ways to add</Link></>}
-          <button className="btn" disabled={busyExport} onClick={() => exportView('csv')}>Export CSV</button>
-          <button className="btn" disabled={busyExport} onClick={() => exportView('xlsx')}>Export Excel</button>
+          <Link href="/scan" className="btn">Scan asset</Link>
+          {me.isIT && <button className="btn btn-primary" onClick={() => setRegisterOpen(true)}>Register asset</button>}
         </>} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -110,6 +106,7 @@ export default function AssetRegister() {
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} onSort={(k, d) => ls.setMany({ sort: k, dir: d })}
         selection={sel} onSelection={setSel} empty="No assets match these filters."
         toolbar={<ActiveFilters chips={chips} onClearAll={ls.clear} right={<SavedFiltersMenu page="assets" query={ls.query} onApply={(q) => router.replace(`/assets?${q}`)} />} />} />
+      <RegisterAssetDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
       <PrintLabelsDialog open={labelsOpen} onClose={() => setLabelsOpen(false)} assetIds={sel.mode === 'ids' ? [...sel.ids] : []} />
       <FormModal open={!!bulk} onClose={() => setBulk('')} danger={bulk === 'RETIRE'}
         title={{ REPAIR: 'Send to repair', REPAIR_DONE: 'Complete repair', RETIRE: 'Retire assets', CHECK_IN: 'Check in', '': '' }[bulk]}

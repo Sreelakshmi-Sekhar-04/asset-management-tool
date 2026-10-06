@@ -32,7 +32,7 @@ async function main() {
   if (only && !branches.length) throw new Error(`No active branch named "${only}".`);
   const cats = await prisma.assetCategory.findMany({ where: { active: true, individuallyTracked: true } });
   const depts = await prisma.department.findMany({ where: { active: true } });
-  if (!branches.length || !cats.length) throw new Error('No active branches or categories: run the seed (npm run db:seed) or create master data first.');
+  if (!branches.length || !cats.length) throw new Error('No active branches or categories: run the large seed (npm run db:seed:large) or create master data first.');
   const run = Date.now().toString(36).toUpperCase();
   console.log(`Generating ${total} assets across ${branches.length} branches (run ${run})…`);
 
