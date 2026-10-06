@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { patchOf } from '@/lib/zod';
-import { createAsset, updateAsset } from '@/server/services/assets';
+import { bulkAddAssets, createAsset, updateAsset } from '@/server/services/assets';
 import { retireAsset } from '@/server/services/lifecycle';
 import { updateCategory } from '@/server/services/master';
 import { updateLocation } from '@/server/services/locations';
@@ -34,6 +34,14 @@ describe('asset registration', () => {
 
   it('requires a serial when the category demands one (server-side)', async () => {
     await rejectsWith(createAsset(w.it.actor, { categoryId: w.cat.id, make: 'Dell', model: 'X', locationId: w.A.id }), 400, /Serial number is required/);
+  });
+
+  it('bulk add accepts a serial-required category when every line has a serial, and names the lines without one', async () => {
+    const base = { categoryId: w.cat.id, make: 'Dell', model: 'Latitude 5440', locationId: w.A.id };
+    const r = await bulkAddAssets(w.it.actor, { ...base, items: [{ serialNumber: `BULK-${w.s}-1` }, { serialNumber: `BULK-${w.s}-2` }] }, { skipApproval: true });
+    expect(r.created?.map((x) => x.serialNumber)).toEqual([`BULK-${w.s}-1`, `BULK-${w.s}-2`]);
+    const err = await rejectsWith(bulkAddAssets(w.it.actor, { ...base, items: [{ serialNumber: `BULK-${w.s}-3` }, {}] }, { skipApproval: true }), 400, /1 line\(s\) cannot be saved/);
+    expect((err as unknown as { details: { line: number }[] }).details?.map((d) => d.line)).toEqual([2]);
   });
 
   it('branch users cannot create assets directly', async () => {
