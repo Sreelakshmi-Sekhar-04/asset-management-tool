@@ -19,6 +19,10 @@ export const forbidden = (msg = 'You do not have permission to perform this acti
 export const notFound = (what = 'Record') => new AppError(404, 'NOT_FOUND', `${what} not found or not accessible.`);
 export const conflict = (msg: string, details?: AppError['details']) => new AppError(409, 'CONFLICT', msg, details);
 
+/** The code is newer than the database: a migration has not been applied after an update. */
+const dbNotMigrated = () =>
+  new AppError(503, 'DB_NOT_MIGRATED', 'The database is not up to date with this version of the app. Ask your administrator to run "npm run db:migrate", then reload the page.');
+
 /** Translate database-level failures into specific, user-readable errors. */
 export function toAppError(e: unknown): AppError {
   if (e instanceof AppError) return e;
@@ -37,8 +41,11 @@ export function toAppError(e: unknown): AppError {
     if (e.code === 'P2025') return notFound();
     if (e.code === 'P2003') return badRequest('A referenced record does not exist.');
     if (e.code === 'P2034') return conflict('Another user changed this record at the same moment. Please retry.');
+    if (e.code === 'P2021' || e.code === 'P2022') return dbNotMigrated();
   }
   const msg = e instanceof Error ? e.message : String(e);
+  // Raw queries report a missing table or column as Postgres 42P01 / 42703 (or 42883 for a missing function).
+  if (/\b(42P01|42703|42883)\b|relation "[^"]+" does not exist/.test(msg)) return dbNotMigrated();
   const m = msg.match(/(ASSET_ID_IMMUTABLE|ASSET_ID_EXHAUSTED|ASSET_RETIRED|TRANSFER_NO_IMMUTABLE|AUDIT_APPEND_ONLY|DELETE_FORBIDDEN)[^\n"]*/);
   if (m) return new AppError(m[1] === 'AUDIT_APPEND_ONLY' || m[1] === 'DELETE_FORBIDDEN' ? 403 : 400, m[1], m[0].replace(/^[A-Z_]+: /, ''));
   if (/inv1_assigned_has_holder|inv2_holder|inv3_retired|holder_reference/.test(msg))
