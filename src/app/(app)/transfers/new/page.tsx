@@ -18,7 +18,8 @@ export default function NewTransfer() {
   const sp = useSearchParams();
   const toast = useToast();
   const { data: allLocs } = useLocations(false, true);
-  const [from, setFrom] = useState(sp.get('from') !== 'selection' ? sp.get('from') ?? (me.isBranch ? me.locationId ?? '' : '') : '');
+  const qFrom = sp.get('from');
+  const [from, setFrom] = useState(qFrom && qFrom !== 'selection' ? qFrom : me.isBranch ? me.locationId ?? '' : '');
   const [to, setTo] = useState('');
   const [picked, setPicked] = useState<Map<string, Pick>>(new Map());
   const [bulkSel, setBulkSel] = useState<{ filter?: Record<string, unknown>; excludeIds?: string[]; count: number } | null>(null);
@@ -33,7 +34,7 @@ export default function NewTransfer() {
       const raw = sessionStorage.getItem('transfer-selection');
       if (!raw) return;
       const s = JSON.parse(raw) as { assetIds?: string[]; filter?: Record<string, unknown>; excludeIds?: string[]; count: number };
-      if (s.assetIds) resolve(s.assetIds.join('\n'), true); else setBulkSel(s);
+      if (s.assetIds) addSelection(s.assetIds).catch((e) => setErr(e)); else setBulkSel(s);
     } else if (sp.get('assetId')) {
       api<Pick & { id: string }>(`/api/assets/${sp.get('assetId')}`).then((a) => setPicked(new Map([[a.id, a]]))).catch(() => undefined);
     }
@@ -46,11 +47,20 @@ export default function NewTransfer() {
   const [paste, setPaste] = useState('');
   const [resolveRes, setResolveRes] = useState<{ unresolved: string[]; invalid: { assetCode: string; message: string }[] } | null>(null);
 
-  async function resolve(text: string, fromSelection = false) {
+  async function resolve(text: string) {
     const r = await api<{ found: Pick[]; unresolved: string[]; invalid: { assetCode: string; message: string }[] }>('/api/transfers/resolve-identifiers', { body: { text, fromLocationId: from || undefined } });
     setPicked((m) => { const n = new Map(m); r.found.forEach((a) => n.set(a.id, a)); return n; });
     setResolveRes({ unresolved: r.unresolved, invalid: r.invalid });
-    if (!fromSelection) setPaste('');
+    setPaste('');
+  }
+
+  // Assets ticked in the register arrive as record ids; add them and start from the location that holds them all.
+  async function addSelection(assetIds: string[]) {
+    const r = await api<{ found: Pick[]; invalid: { assetCode: string; message: string }[]; commonLocationId: string | null }>('/api/transfers/resolve-identifiers', { body: { assetIds, fromLocationId: from || undefined } });
+    setPicked(new Map(r.found.map((a) => [a.id, a])));
+    if (r.commonLocationId) setFrom((f) => f || r.commonLocationId!);
+    // Ids the user can no longer see (deleted or out of scope) are dropped quietly; problems are worth showing.
+    setResolveRes({ unresolved: [], invalid: r.invalid });
   }
 
   // Camera scanning: each scan adds one asset and reports what happened to it.
@@ -141,12 +151,6 @@ export default function NewTransfer() {
                 )}
                 <textarea className="input font-mono text-xs" rows={5} placeholder="Asset IDs, serial numbers or legacy tags — one per line, or separated by commas or spaces. A scanner can type straight into this box." value={paste} onChange={(e) => setPaste(e.target.value)} />
                 <button className="btn" disabled={!paste.trim()} onClick={() => resolve(paste).catch((e) => setErr(e))}>Add to transfer</button>
-                {resolveRes && (resolveRes.unresolved.length > 0 || resolveRes.invalid.length > 0) && (
-                  <div className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
-                    {resolveRes.unresolved.length > 0 && <div><b>Not found in your scope:</b> {resolveRes.unresolved.join(', ')}</div>}
-                    {resolveRes.invalid.map((i) => <div key={i.assetCode}>{i.message}</div>)}
-                  </div>
-                )}
               </div>
             )}
             {tab === 'browse' && (!from ? <p className="text-sm text-slate-500">Choose the from-location first.</p> : (
@@ -170,6 +174,12 @@ export default function NewTransfer() {
                 </div>
               </div>
             ))}
+            {resolveRes && (resolveRes.unresolved.length > 0 || resolveRes.invalid.length > 0) && (
+              <div className="mt-3 rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                {resolveRes.unresolved.length > 0 && <div><b>Not found in your scope:</b> {resolveRes.unresolved.join(', ')}</div>}
+                {resolveRes.invalid.map((i) => <div key={i.assetCode}>{i.message}</div>)}
+              </div>
+            )}
             {picked.size > 0 && (
               <div className="mt-3">
                 <div className="mb-1 flex items-center justify-between text-xs text-slate-500"><span>Selected</span><button className="underline" onClick={() => setPicked(new Map())}>Remove all</button></div>
