@@ -1,10 +1,10 @@
 'use client';
 import clsx from 'clsx';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ROLE_LABEL } from '@/lib/labels';
-import { api, ApiError } from './api';
+import { api } from './api';
 import { useMe } from './me';
 
 type Item = { href: string; label: string; roles?: ('ADMIN' | 'IT_OPERATOR' | 'BRANCH_USER')[] };
@@ -53,11 +53,8 @@ const NAV: { group: string; items: Item[] }[] = [
 export function Shell({ children }: { children: React.ReactNode }) {
   const me = useMe();
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
-  const [lookup, setLookup] = useState('');
-  const [lookupErr, setLookupErr] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   useEffect(() => { try { setExpanded(new Set(JSON.parse(localStorage.getItem('itam:nav') ?? '[]') as string[])); } catch { /* storage unavailable */ } }, []);
   useEffect(() => { setOpen(false); }, [pathname]);
@@ -70,18 +67,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
   }, [pathname]);
   const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname === href || (pathname.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && pathname.startsWith(i.href)))));
-  const doLookup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLookupErr('');
-    if (!lookup.trim()) return;
-    try {
-      const a = await api<{ id: string }>(`/api/assets/lookup?q=${encodeURIComponent(lookup.trim())}`);
-      setLookup('');
-      router.push(`/assets/${a.id}`);
-    } catch (x) {
-      setLookupErr(x instanceof ApiError && x.status === 404 ? `No asset "${lookup.trim()}" in your scope` : 'Lookup failed');
-    }
-  };
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); window.location.href = '/login'; };
   // Groups fold so the menu fits the screen: the group holding the current page is always
   // open; others open on click and stay as the user left them.
@@ -126,11 +111,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {open && <div className="fixed inset-0 z-30 bg-slate-900/30 lg:hidden" onClick={() => setOpen(false)} />}
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b bg-white/95 px-3 py-2 backdrop-blur sm:px-4">
         <button className="btn btn-ghost btn-sm lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
-        <form onSubmit={doLookup} className="relative flex max-w-sm flex-1 items-center gap-1">
-          <input className="input py-1" placeholder="Go to Asset ID, serial or legacy tag" value={lookup} onChange={(e) => { setLookup(e.target.value); setLookupErr(''); }} aria-label="Asset lookup" />
-          {lookupErr && <span className="absolute left-0 top-full mt-1 rounded bg-red-600 px-2 py-0.5 text-xs text-white">{lookupErr}</span>}
-        </form>
-        <Link href="/scan" className="btn btn-ghost btn-sm" aria-label="Scan an asset label" title="Scan an asset label">📷</Link>
         <div className="ml-auto flex items-center gap-2">
           <Link href="/notifications" className="btn btn-ghost btn-sm relative" aria-label={`Notifications (${unread} unread)`}>
             🔔{unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{unread > 99 ? '99+' : unread}</span>}

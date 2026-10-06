@@ -65,5 +65,5 @@ The reference project mentioned in the request was not available, so this featur
 | QR generation and preview | QR only inside the label PDF | QR card with preview and PNG download | Asset page |
 | QR printing, single and batch | A4 3 × 8 PDF, downloaded | Print dialog, print preview in a new tab, label-printer layout, start position, from bulk add and after registration | Asset page, register, bulk add |
 | Scanner | Keyboard-wedge scanning in search and verification | Camera scanner page, camera in verification, scan links | Assets › Scan asset, top bar, verification |
-| Asset lookup by scan | Global search by ID, serial, legacy tag | Also accepts scan links | Everywhere a code is scanned |
+| Asset lookup by scan | Scan asset page (menu) by ID, serial, legacy tag | Also accepts scan links | Everywhere a code is scanned |
 | Assignment, transfer, history, retire | Present | Reached from the scan result and asset page | — |
