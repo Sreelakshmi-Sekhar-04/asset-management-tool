@@ -5,7 +5,8 @@ import { fmtDateTime } from '@/lib/format';
 import { APPROVAL_ACTION_LABEL, label } from '@/lib/labels';
 import { api, useApi } from '@/components/api';
 import type { ApprovalReq } from '@/components/approval-chain';
-import { DataTable, emptySelection, FilterSelect, useListState, type Selection } from '@/components/list';
+import { DataTable, emptySelection, useListState, type Selection } from '@/components/list';
+import { useColumnFilters } from '@/components/list-filters';
 import { useMe } from '@/components/me';
 import { Badge, Field, FormModal, PageHeader, Tabs, useToast } from '@/components/ui';
 
@@ -26,27 +27,29 @@ export default function Approvals() {
   const [bulk, setBulk] = useState<'' | 'APPROVE' | 'REJECT'>('');
   const [comment, setComment] = useState('');
   const ids = sel.mode === 'ids' ? [...sel.ids] : [];
+  const f = useColumnFilters(ls);
+  const actionFilter = f.option('action', 'Action', Object.entries(APPROVAL_ACTION_LABEL).map(([value, l]) => ({ value, label: l })), 'All actions');
+  const statusFilter = view !== 'actionable' ? f.option('status', 'Status', ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'FAILED'].map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() })), 'All statuses') : undefined;
   return (
     <div>
       <PageHeader title="Approvals" subtitle="You cannot approve your own request (Administrators excepted). Parallel steps all need a decision; sequential steps run in order." />
       <Tabs value={view} onChange={(v) => { ls.setMany({ view: v }); setSel(emptySelection()); }} tabs={[...(me.isIT ? [{ key: 'actionable', label: 'Awaiting my decision' }] : []), { key: 'mine', label: 'My requests' }, { key: 'all', label: 'All visible' }]} />
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        {view !== 'actionable' && <FilterSelect label="Status" value={ls.get('status')} onChange={(v) => ls.set('status', v)} options={['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'FAILED'].map((s) => ({ value: s, label: s.toLowerCase() }))} />}
-        <FilterSelect label="Action" value={ls.get('action')} onChange={(v) => ls.set('action', v)} options={Object.entries(APPROVAL_ACTION_LABEL).map(([value, l]) => ({ value, label: l }))} />
-        {view === 'actionable' && ids.length > 0 && <>
+      {view === 'actionable' && ids.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           <button className="btn btn-sm btn-primary" onClick={() => { setBulk('APPROVE'); setComment(''); }}>Approve {ids.length}</button>
           <button className="btn btn-sm btn-danger" onClick={() => { setBulk('REJECT'); setComment(''); }}>Reject {ids.length}</button>
-        </>}
-      </div>
+        </div>
+      )}
       <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
         selection={view === 'actionable' ? sel : undefined} onSelection={setSel} empty={view === 'actionable' ? 'Nothing is waiting for you.' : 'No requests.'}
+        toolbar={f.strip()}
         columns={[
           { key: 'requestNo', header: 'Request', render: (r) => <Link href={r.entityType === 'Transfer' && r.entityId ? `/transfers/${r.entityId}` : `/approvals/${r.id}`} className="font-medium">{r.requestNo}</Link> },
-          { key: 'action', header: 'Action', render: (r) => label(APPROVAL_ACTION_LABEL, r.action) },
+          { key: 'action', header: 'Action', filter: actionFilter, render: (r) => label(APPROVAL_ACTION_LABEL, r.action) },
           { key: 'summary', header: 'Summary', render: (r) => <span className="text-xs">{r.summary}</span> },
           { key: 'policy', header: 'Rule', render: (r) => <span className="text-xs text-slate-500">{r.policyName}</span> },
           { key: 'by', header: 'Raised by', render: (r) => <span className="text-xs">{r.initiatorName}<br />{fmtDateTime(r.createdAt)}</span> },
-          { key: 'status', header: 'Status', render: (r) => <span className="flex flex-col items-start gap-1"><Badge tone={TONE[r.status]}>{r.status.toLowerCase()}</Badge>{r.status === 'PENDING' && <span className="text-xs text-slate-500">Step {r.currentOrder}</span>}</span> },
+          { key: 'status', header: 'Status', filter: statusFilter, render: (r) => <span className="flex flex-col items-start gap-1"><Badge tone={TONE[r.status]}>{r.status.toLowerCase()}</Badge>{r.status === 'PENDING' && <span className="text-xs text-slate-500">Step {r.currentOrder}</span>}</span> },
         ]} />
       <FormModal open={!!bulk} onClose={() => setBulk('')} title={`${bulk === 'APPROVE' ? 'Approve' : 'Reject'} ${ids.length} request(s)`} submitLabel={bulk === 'APPROVE' ? 'Approve' : 'Reject'} danger={bulk === 'REJECT'}
         onSubmit={async () => {

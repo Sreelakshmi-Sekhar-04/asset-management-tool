@@ -37,7 +37,7 @@ async function branchesInScope(db: Db, scope: string, ids: string[]) {
 
 /** FR-VER-01: one task per branch, each holding a snapshot of that branch's assets at creation time. */
 export async function createCampaign(actor: Actor, input: unknown, opts: { parentId?: string } = {}) {
-  if (actor.role === 'BRANCH_USER') throw forbidden('Verification campaigns are created by IT.');
+  if (actor.role === 'BRANCH_USER') throw forbidden('Campaigns are created by IT.');
   const data = campaignInput.parse(input);
   if (data.dueDate < todayIST()) throw badRequest('The due date cannot be in the past.');
   return tx(async (t) => {
@@ -63,7 +63,7 @@ export async function createCampaign(actor: Actor, input: unknown, opts: { paren
         });
       }
       lineTotal += assets.length;
-      await notifyUsers(t, await branchUserIdsFor(t, b.id), { type: 'VERIFICATION', title: `Verification task: ${data.name}`, body: `Please verify the ${assets.length} asset(s) at ${b.namePath} by ${fmtDateOnly(due)}.`, link: `/verification/tasks/${task.id}`, eventKey: `verification:${task.id}:assigned` });
+      await notifyUsers(t, await branchUserIdsFor(t, b.id), { type: 'VERIFICATION', title: `Campaign task: ${data.name}`, body: `Please verify the ${assets.length} asset(s) at ${b.namePath} by ${fmtDateOnly(due)}.`, link: `/campaigns/tasks/${task.id}`, eventKey: `verification:${task.id}:assigned` });
     }
     await audit(t, actor, { action: 'VERIFICATION_CAMPAIGN_CREATED', entityType: 'VerificationCampaign', entityId: campaign.id, entityLabel: campaign.name, details: { scope: data.scope, branches: branches.length, lines: lineTotal, dueDate: data.dueDate, quarterly: data.recurrenceQuarterly } });
     return { campaign, tasks: branches.length, lines: lineTotal };
@@ -81,7 +81,7 @@ export async function closeCampaign(actor: Actor, id: string) {
 
 async function scopedTask(actor: Actor, id: string, db: Db = prisma) {
   const task = await db.verificationTask.findUnique({ where: { id }, include: { location: true, campaign: true } });
-  if (!task || !inScopePath(actor, task.location.idPath)) throw notFound('Verification task');
+  if (!task || !inScopePath(actor, task.location.idPath)) throw notFound('Campaign task');
   return task;
 }
 
@@ -89,9 +89,10 @@ function assertEditable(actor: Actor, status: VerificationTaskStatus) {
   if (status === 'SUBMITTED' || status === 'SIGNED_OFF') throw conflict(actor.role === 'BRANCH_USER' ? 'This task has been submitted and is locked. Only IT can reopen it.' : 'This task is submitted; reopen it before editing.');
 }
 
-export async function listTasks(actor: Actor, p: { campaignId?: string; status?: string; skip: number; take: number }) {
+export async function listTasks(actor: Actor, p: { campaignId?: string; status?: string; locationId?: string; skip: number; take: number }) {
+  const under = p.locationId ? await prisma.location.findUnique({ where: { id: p.locationId }, select: { idPath: true } }) : null;
   const where: Prisma.VerificationTaskWhereInput = {
-    location: locationScope(actor),
+    AND: [{ location: locationScope(actor) }, ...(p.locationId ? [{ location: { idPath: { startsWith: under?.idPath ?? '/__none__/' } } }] : [])],
     ...(p.campaignId ? { campaignId: p.campaignId } : {}),
     ...(p.status ? { status: p.status as VerificationTaskStatus } : {}),
   };
@@ -244,7 +245,7 @@ export async function submitTask(actor: Actor, taskId: string) {
     const u = await t.verificationTask.update({ where: { id: taskId }, data: { status: 'SUBMITTED', submittedAt: new Date(), submittedById: actor.id, submittedByName: actor.name } });
     const stats = (await taskStats([taskId]))(taskId);
     await audit(t, actor, { action: 'VERIFICATION_SUBMITTED', entityType: 'VerificationTask', entityId: taskId, entityLabel: `${task.campaign.name} — ${task.location.namePath}`, details: stats, locationIds: [task.locationId] });
-    await notifyUsers(t, await itUserIds(t), { type: 'VERIFICATION', title: `Verification submitted: ${task.location.namePath}`, body: `${task.campaign.name}: ${stats.present} present, ${stats.missing} missing, ${stats.wrong} wrong details, ${stats.unlisted} unlisted.`, link: `/verification/tasks/${taskId}`, eventKey: `verification:${taskId}:submitted:${Date.now()}` });
+    await notifyUsers(t, await itUserIds(t), { type: 'VERIFICATION', title: `Campaign task submitted: ${task.location.namePath}`, body: `${task.campaign.name}: ${stats.present} present, ${stats.missing} missing, ${stats.wrong} wrong details, ${stats.unlisted} unlisted.`, link: `/campaigns/tasks/${taskId}`, eventKey: `verification:${taskId}:submitted:${Date.now()}` });
     return u;
   });
 }
@@ -257,7 +258,7 @@ export async function reopenTask(actor: Actor, taskId: string, reason: string) {
     if (task.status !== 'SUBMITTED') throw conflict('Only a submitted (not signed-off) task can be reopened.');
     await t.verificationTask.update({ where: { id: taskId }, data: { status: 'IN_PROGRESS', submittedAt: null } });
     await audit(t, actor, { action: 'VERIFICATION_REOPENED', entityType: 'VerificationTask', entityId: taskId, details: { reason }, locationIds: [task.locationId] });
-    await notifyUsers(t, await branchUserIdsFor(t, task.locationId), { type: 'VERIFICATION', title: `Verification reopened: ${task.campaign.name}`, body: `IT reopened your verification task: ${reason}`, link: `/verification/tasks/${taskId}`, eventKey: `verification:${taskId}:reopen:${Date.now()}` });
+    await notifyUsers(t, await branchUserIdsFor(t, task.locationId), { type: 'VERIFICATION', title: `Campaign task reopened: ${task.campaign.name}`, body: `IT reopened your campaign task: ${reason}`, link: `/campaigns/tasks/${taskId}`, eventKey: `verification:${taskId}:reopen:${Date.now()}` });
     return { ok: true };
   });
 }
@@ -287,7 +288,7 @@ export async function reviewLine(actor: Actor, taskId: string, lineId: string, i
         const changes: Record<string, unknown> = {};
         if (line.correctedHostname && line.correctedHostname !== asset.hostname) changes.hostname = line.correctedHostname;
         if (line.correctedIp && line.correctedIp !== asset.ipAddress) changes.ipAddress = line.correctedIp;
-        if (line.correctedRemarks) changes.remarks = [asset.remarks, `Verification: ${line.correctedRemarks}`].filter(Boolean).join('\n');
+        if (line.correctedRemarks) changes.remarks = [asset.remarks, `Campaign: ${line.correctedRemarks}`].filter(Boolean).join('\n');
         const hits = await findDuplicates(t, { hostname: changes.hostname as string, ipAddress: changes.ipAddress as string }, asset.id);
         const warns = enforceDuplicates(hits, data.duplicateReason);
         if (Object.keys(changes).length) {
@@ -306,7 +307,7 @@ export async function reviewLine(actor: Actor, taskId: string, lineId: string, i
           const status = asset.status === 'UNDER_REPAIR' ? 'UNDER_REPAIR' : 'ASSIGNED';
           await t.asset.update({ where: { id: asset.id }, data: { status, ...holderColumns(holder) } });
           await switchAssignment(t, actor, asset.id, holder, 'VERIFICATION');
-          await recordMovement(t, actor, 'CORRECTION', asset, { id: asset.id, status, locationId: asset.locationId, holder }, { reason: `Verification correction (${task.campaign.name})`, isCorrection: true });
+          await recordMovement(t, actor, 'CORRECTION', asset, { id: asset.id, status, locationId: asset.locationId, holder }, { reason: `Campaign correction (${task.campaign.name})`, isCorrection: true });
           applied.holder = holder;
           void holderOf;
         }
@@ -440,10 +441,10 @@ export async function runVerificationScheduler(asOf: string = todayIST()) {
     const key = `verification-reminder:${t.id}:${tier}`;
     const claimed = await prisma.scheduledEvent.createMany({ data: [{ key }], skipDuplicates: true });
     if (!claimed.count) continue;
-    const title = tier === 'overdue' ? `Overdue verification: ${t.campaign.name}` : `Verification due in ${days} day(s): ${t.campaign.name}`;
-    const body = `${t.location.namePath} has not yet submitted its verification (due ${fmtDateOnly(t.campaign.dueDate)}).`;
-    await notifyUsers(prisma, await branchUserIdsFor(prisma, t.locationId), { type: 'VERIFICATION', title, body, link: `/verification/tasks/${t.id}`, eventKey: key });
-    if (tier === 'overdue') await notifyUsers(prisma, await itUserIds(prisma), { type: 'VERIFICATION', title, body, link: `/verification/tasks/${t.id}`, eventKey: key });
+    const title = tier === 'overdue' ? `Overdue campaign task: ${t.campaign.name}` : `Campaign task due in ${days} day(s): ${t.campaign.name}`;
+    const body = `${t.location.namePath} has not yet submitted its campaign task (due ${fmtDateOnly(t.campaign.dueDate)}).`;
+    await notifyUsers(prisma, await branchUserIdsFor(prisma, t.locationId), { type: 'VERIFICATION', title, body, link: `/campaigns/tasks/${t.id}`, eventKey: key });
+    if (tier === 'overdue') await notifyUsers(prisma, await itUserIds(prisma), { type: 'VERIFICATION', title, body, link: `/campaigns/tasks/${t.id}`, eventKey: key });
     await audit(prisma, SYSTEM_ACTOR, { action: 'VERIFICATION_REMINDER_SENT', entityType: 'VerificationTask', entityId: t.id, entityLabel: `${t.campaign.name} — ${t.location.namePath}`, details: { tier }, locationIds: [t.locationId] });
     reminders++;
   }

@@ -196,7 +196,7 @@ export async function markRenewed(actor: Actor, id: string, input: unknown) {
 
 // ───────────── Queries (FR-REN-07) ─────────────
 
-export interface RenewableFilters { type?: string[]; locationId?: string; withinDays?: number; status?: string[]; search?: string; assetId?: string; expired?: boolean }
+export interface RenewableFilters { type?: string[]; locationId?: string; withinDays?: number; status?: string[]; search?: string; assetId?: string; expired?: boolean; name?: string; asset?: string; owner?: string }
 
 export async function renewableWhere(actor: Actor, f: RenewableFilters): Promise<Prisma.RenewableWhereInput> {
   const and: Prisma.RenewableWhereInput[] = [{ asset: assetScope(actor) }];
@@ -214,6 +214,17 @@ export async function renewableWhere(actor: Actor, f: RenewableFilters): Promise
   if (f.expired) and.push({ expiryDate: { lt: dateOnly(todayIST()) } });
   if (f.assetId) and.push({ assetId: f.assetId });
   if (f.search) and.push({ OR: [{ label: { contains: f.search, mode: 'insensitive' } }, { vendor: { contains: f.search, mode: 'insensitive' } }, { identifier: { contains: f.search, mode: 'insensitive' } }, { asset: { assetCode: { contains: f.search, mode: 'insensitive' } } }] });
+  // Column-heading filters on the Renewals screen.
+  const has = (v: string) => ({ contains: v, mode: 'insensitive' as const });
+  if (f.name) and.push({ OR: [{ label: has(f.name) }, { vendor: has(f.name) }, { identifier: has(f.name) }] });
+  if (f.asset) and.push({ asset: { OR: [{ assetCode: has(f.asset) }, { make: has(f.asset) }, { model: has(f.asset) }] } });
+  if (f.owner) {
+    const [users, emps] = await Promise.all([
+      prisma.user.findMany({ where: { name: has(f.owner) }, select: { id: true }, take: 500 }),
+      prisma.employee.findMany({ where: { name: has(f.owner) }, select: { id: true }, take: 500 }),
+    ]);
+    and.push({ OR: [{ ownerUserId: { in: users.map((u) => u.id) } }, { ownerEmployeeId: { in: emps.map((e) => e.id) } }] });
+  }
   return { AND: and };
 }
 

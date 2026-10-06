@@ -118,7 +118,7 @@ async function validateRefs(db: Db, data: { categoryId: string; serialNumber?: s
 }
 
 export async function createAsset(actor: Actor, input: unknown, opts: { db?: Db; skipApproval?: boolean; origin?: string; approverName?: string } = {}) {
-  if (actor.role === 'BRANCH_USER') throw forbidden('Branch users cannot create assets directly; add unlisted assets through a verification task.');
+  if (actor.role === 'BRANCH_USER') throw forbidden('Branch users cannot create assets directly; add unlisted assets through a campaign task.');
   const data = createAssetInput.parse(input);
   const run = async (t: Db) => {
     const cat = await validateRefs(t, data);

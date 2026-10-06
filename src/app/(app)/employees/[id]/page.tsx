@@ -41,7 +41,7 @@ export default function EmployeePage() {
   return (
     <div className="space-y-4">
       {node}
-      <PageHeader back={{ href: '/employees', label: 'Employees' }} title={e.name}
+      <PageHeader back={{ href: '/employees', label: 'Users & Employees' }} title={e.name}
         subtitle={<span className="flex items-center gap-2">{e.employeeCode}{!e.active && <Badge>Inactive</Badge>}{e.source === 'AD' && <Badge tone="blue">Synced from AD</Badge>}</span>}
         actions={me.isIT && <>
           {e.heldAssets.length > 0 && <button className="btn btn-primary" onClick={() => setOff(true)}>Offboard</button>}

@@ -2,9 +2,9 @@
  * LARGE DEVELOPMENT / UAT DATASET — NOT FOR PRODUCTION. `npm run db:seed:large`
  *
  * For volume and load testing (`db:generate-volume`, `load:test`); the everyday seed
- * (`npm run db:seed`) loads only 5 records of each kind. Creates a realistic sample organisation through the application's own services, so
+ * (`npm run db:seed`) loads only about 5 records of each kind. Creates a realistic sample organisation through the application's own services, so
  * every record carries proper movements, audit entries and notifications:
- *   3 regions · 6 states · 15 branches · 2 Administrators · 3 IT Operators · 15 branch users
+ *   15 Kerala branches (South › Kerala) · 2 Administrators · 3 IT Operators · 15 branch users
  *   ~40 employees · ~150 assets · transfers in every state · an open exception
  *   renewables · approval and reminder policies · a verification campaign · a device source.
  *
@@ -39,10 +39,9 @@ const int = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (s: string, n: number) => ymd(new Date(new Date(`${s}T00:00:00Z`).getTime() + n * 86_400_000));
 
+// Kerala only: one region and one state, as in the everyday demo seed, with fifteen branches.
 const REGIONS: Record<string, Record<string, string[]>> = {
-  North: { Delhi: ['Connaught Place', 'Saket'], 'Uttar Pradesh': ['Lucknow', 'Noida', 'Kanpur'] },
-  South: { Karnataka: ['Bengaluru MG Road', 'Mysuru', 'Hubballi'], 'Tamil Nadu': ['Chennai Anna Nagar', 'Coimbatore'] },
-  West: { Maharashtra: ['Mumbai Andheri', 'Pune', 'Nagpur'], Gujarat: ['Ahmedabad', 'Surat'] },
+  South: { Kerala: ['Kochi Kakkanad', 'Kochi MG Road', 'Thiruvananthapuram', 'Kollam', 'Pathanamthitta', 'Kozhikode', 'Malappuram', 'Kannur', 'Thrissur', 'Palakkad', 'Kochi Edappally', 'Alappuzha', 'Kottayam', 'Kasaragod', 'Kalpetta'] },
 };
 
 const CATALOGUE = [
@@ -103,7 +102,7 @@ async function main() {
     }
   }
   const byName = (n: string) => branches.find((b) => b.name === n)!;
-  const hq = byName('Mumbai Andheri');
+  const hq = byName('Kochi Edappally');
 
   // ── Master data ──
   const cats: Record<string, string> = {};
@@ -164,10 +163,10 @@ async function main() {
     }
   }
   // A deliberate duplicate-suspect pair (same hostname, reason recorded).
-  const dupSrc = assets.find((a) => a.cat === 'Laptop' && a.branchId === byName('Pune').id)!;
+  const dupSrc = assets.find((a) => a.cat === 'Laptop' && a.branchId === byName('Alappuzha').id)!;
   const dupHost = (await prisma.asset.findUniqueOrThrow({ where: { id: dupSrc.id } })).hostname;
-  const dup = await createAsset(it, { categoryId: cats.Laptop, make: 'Dell', model: 'Latitude 5440', serialNumber: `DELAT${serialN++}`, hostname: dupHost, locationId: byName('Pune').id, purchaseCost: 78000, warrantyEnd: addDays(today, 45), duplicateReason: 'Replacement laptop re-imaged with the old hostname; old unit awaiting return' }, { skipApproval: true });
-  if ('asset' in dup && dup.asset) assets.push({ id: dup.asset.id, code: dup.asset.assetCode, branchId: byName('Pune').id, cat: 'Laptop', cost: 78000 });
+  const dup = await createAsset(it, { categoryId: cats.Laptop, make: 'Dell', model: 'Latitude 5440', serialNumber: `DELAT${serialN++}`, hostname: dupHost, locationId: byName('Alappuzha').id, purchaseCost: 78000, warrantyEnd: addDays(today, 45), duplicateReason: 'Replacement laptop re-imaged with the old hostname; old unit awaiting return' }, { skipApproval: true });
+  if ('asset' in dup && dup.asset) assets.push({ id: dup.asset.id, code: dup.asset.assetCode, branchId: byName('Alappuzha').id, cat: 'Laptop', cost: 78000 });
 
   // ── Assignments (≈60%), repairs and retirements ──
   for (const a of assets) {
@@ -200,39 +199,39 @@ async function main() {
   const take = async (b: string, n: number) => { const ids = await stockAt(b, n, used); used.push(...ids); return ids; };
 
   // Completed (intra-state, IT-raised → auto-approved), received in full.
-  const t1 = await createTransfer(it, { fromLocationId: byName('Lucknow').id, toLocationId: byName('Noida').id, reason: 'Branch expansion at Noida', assetIds: await take(byName('Lucknow').id, 3) });
-  await receive(branchUsers[byName('Noida').id], (t1 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Store keeper, Noida', all: 'RECEIVED' });
+  const t1 = await createTransfer(it, { fromLocationId: byName('Thiruvananthapuram').id, toLocationId: byName('Kollam').id, reason: 'Branch expansion at Kollam', assetIds: await take(byName('Thiruvananthapuram').id, 3) });
+  await receive(branchUsers[byName('Kollam').id], (t1 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Store keeper, Kollam', all: 'RECEIVED' });
   // Completed with an exception (one line not received).
-  const t2 = await createTransfer(it, { fromLocationId: byName('Pune').id, toLocationId: byName('Nagpur').id, reason: 'Replacement stock for Nagpur', assetIds: await take(byName('Pune').id, 3) });
+  const t2 = await createTransfer(it, { fromLocationId: byName('Alappuzha').id, toLocationId: byName('Kottayam').id, reason: 'Replacement stock for Kottayam', assetIds: await take(byName('Alappuzha').id, 3) });
   const t2id = (t2 as { transfer: { id: string } }).transfer.id;
   const t2lines = await prisma.transferLine.findMany({ where: { transferId: t2id }, orderBy: { assetCode: 'asc' } });
-  await receive(branchUsers[byName('Nagpur').id], t2id, { receivedByName: 'Nagpur branch manager', lines: t2lines.map((l, i) => ({ lineId: l.id, outcome: i === 0 ? 'NOT_RECEIVED' : 'RECEIVED', reason: i === 0 ? 'Box missing on delivery' : null })) });
+  await receive(branchUsers[byName('Kottayam').id], t2id, { receivedByName: 'Kottayam branch manager', lines: t2lines.map((l, i) => ({ lineId: l.id, outcome: i === 0 ? 'NOT_RECEIVED' : 'RECEIVED', reason: i === 0 ? 'Box missing on delivery' : null })) });
   // Partially received.
-  const t3 = await createTransfer(it, { fromLocationId: byName('Bengaluru MG Road').id, toLocationId: byName('Mysuru').id, reason: 'Temporary deployment for audit season', assetIds: await take(byName('Bengaluru MG Road').id, 4) });
+  const t3 = await createTransfer(it, { fromLocationId: byName('Kozhikode').id, toLocationId: byName('Malappuram').id, reason: 'Temporary deployment for audit season', assetIds: await take(byName('Kozhikode').id, 4) });
   const t3id = (t3 as { transfer: { id: string } }).transfer.id;
   const t3first = await prisma.transferLine.findFirstOrThrow({ where: { transferId: t3id }, orderBy: { assetCode: 'asc' } });
-  await receive(branchUsers[byName('Mysuru').id], t3id, { receivedByName: 'Mysuru front office', lines: [{ lineId: t3first.id, outcome: 'RECEIVED' }] });
+  await receive(branchUsers[byName('Malappuram').id], t3id, { receivedByName: 'Malappuram front office', lines: [{ lineId: t3first.id, outcome: 'RECEIVED' }] });
   // In transit (and aged beyond the threshold for the aging report).
-  const t4 = await createTransfer(it, { fromLocationId: byName('Connaught Place').id, toLocationId: byName('Saket').id, reason: 'Desk moves to Saket', assetIds: await take(byName('Connaught Place').id, 2) });
+  const t4 = await createTransfer(it, { fromLocationId: byName('Kochi Kakkanad').id, toLocationId: byName('Kochi MG Road').id, reason: 'Desk moves to Kochi MG Road', assetIds: await take(byName('Kochi Kakkanad').id, 2) });
   await prisma.transfer.update({ where: { id: (t4 as { transfer: { id: string } }).transfer.id }, data: { approvedAt: new Date(Date.now() - 10 * 86_400_000) } });
-  await createTransfer(it, { fromLocationId: byName('Chennai Anna Nagar').id, toLocationId: byName('Coimbatore').id, reason: 'New joiners at Coimbatore', assetIds: await take(byName('Chennai Anna Nagar').id, 2) });
+  await createTransfer(it, { fromLocationId: byName('Thrissur').id, toLocationId: byName('Palakkad').id, reason: 'New joiners at Palakkad', assetIds: await take(byName('Thrissur').id, 2) });
   // Pending approval: branch-raised (falls back to IT approval).
-  await createTransfer(branchUsers[byName('Ahmedabad').id], { fromLocationId: byName('Ahmedabad').id, toLocationId: byName('Surat').id, reason: 'Surat printer failed; lending a spare', assetIds: await take(byName('Ahmedabad').id, 1) });
+  await createTransfer(branchUsers[byName('Kasaragod').id], { fromLocationId: byName('Kasaragod').id, toLocationId: byName('Kalpetta').id, reason: 'Kalpetta printer failed; lending a spare', assetIds: await take(byName('Kasaragod').id, 1) });
   // Pending approval: inter-state (policy).
-  await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Ahmedabad').id, reason: 'Stock replenishment for Gujarat', invoiceNumber: 'DC/2026/0412', assetIds: await take(hq.id, 3) });
+  await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Kasaragod').id, reason: 'Stock replenishment for North Kerala', invoiceNumber: 'DC/2026/0412', assetIds: await take(hq.id, 3) });
   // Rejected: branch-raised, IT rejects.
-  const t8 = await createTransfer(branchUsers[byName('Kanpur').id], { fromLocationId: byName('Kanpur').id, toLocationId: byName('Lucknow').id, reason: 'Return surplus monitor', assetIds: await take(byName('Kanpur').id, 1) });
+  const t8 = await createTransfer(branchUsers[byName('Pathanamthitta').id], { fromLocationId: byName('Pathanamthitta').id, toLocationId: byName('Thiruvananthapuram').id, reason: 'Return surplus monitor', assetIds: await take(byName('Pathanamthitta').id, 1) });
   const t8req = await prisma.transfer.findUniqueOrThrow({ where: { id: (t8 as { transfer: { id: string } }).transfer.id } });
-  if (t8req.approvalRequestId) await decide(it2, t8req.approvalRequestId, 'REJECT', 'Keep the monitor at Kanpur; Lucknow has spares.');
+  if (t8req.approvalRequestId) await decide(it2, t8req.approvalRequestId, 'REJECT', 'Keep the monitor at Pathanamthitta; Thiruvananthapuram has spares.');
   // Draft.
-  await createTransfer(it, { fromLocationId: byName('Hubballi').id, toLocationId: byName('Bengaluru MG Road').id, reason: 'Consolidate spares at Bengaluru', assetIds: await take(byName('Hubballi').id, 2), submit: false });
+  await createTransfer(it, { fromLocationId: byName('Kannur').id, toLocationId: byName('Kozhikode').id, reason: 'Consolidate spares at Kozhikode', assetIds: await take(byName('Kannur').id, 2), submit: false });
   // Cancelled.
   const { cancelTransfer } = await import('../src/server/services/transfers');
-  const t10 = await createTransfer(it, { fromLocationId: byName('Surat').id, toLocationId: byName('Ahmedabad').id, reason: 'Raised in error', assetIds: await take(byName('Surat').id, 1), submit: false });
+  const t10 = await createTransfer(it, { fromLocationId: byName('Kalpetta').id, toLocationId: byName('Kasaragod').id, reason: 'Raised in error', assetIds: await take(byName('Kalpetta').id, 1), submit: false });
   await cancelTransfer(it, (t10 as { transfer: { id: string } }).transfer.id);
   // Late-recorded (back-dated by IT).
-  const t11 = await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Pune').id, reason: 'Physical move done last week; recording now', effectiveDate: addDays(today, -6), assetIds: await take(hq.id, 1) });
-  await receive(branchUsers[byName('Pune').id], (t11 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Pune IT desk', all: 'RECEIVED' });
+  const t11 = await createTransfer(it, { fromLocationId: hq.id, toLocationId: byName('Alappuzha').id, reason: 'Physical move done last week; recording now', effectiveDate: addDays(today, -6), assetIds: await take(hq.id, 1) });
+  await receive(branchUsers[byName('Alappuzha').id], (t11 as { transfer: { id: string } }).transfer.id, { receivedByName: 'Alappuzha IT desk', all: 'RECEIVED' });
 
   // ── Renewables beyond automatic warranties ──
   const fw = assets.filter((a) => a.cat === 'Firewall');
@@ -255,8 +254,8 @@ async function main() {
     await markLines(ba, task.id, { lines: submit ? marks : marks.slice(0, Math.ceil(marks.length / 2)) });
     if (submit) await submitTask(ba, task.id);
   };
-  await doTask('Surat', true);
-  await doTask('Hubballi', false);
+  await doTask('Kalpetta', true);
+  await doTask('Kannur', false);
 
   // ── A device integration source with one sample batch (health page, unmatched queue) ──
   const src = await saveSource(adminA, null, { key: 'mdm', name: 'Device management (sample)', kind: 'DEVICE', rateLimitPerMinute: 60, secondaryMatchKey: 'hostname', mappings: [{ field: 'hostname', rule: 'WARN' }, { field: 'ipAddress', rule: 'OVERWRITE' }, { field: 'macAddress', rule: 'OVERWRITE' }, { field: 'warrantyEnd', rule: 'WARN' }] });
@@ -275,7 +274,7 @@ async function main() {
   console.log(`\nDEVELOPMENT ONLY — demo sign-ins (password: ${process.env.SEED_DEMO_PASSWORD ? '$SEED_DEMO_PASSWORD' : DEMO_PASSWORD}):`);
   console.log(`  Administrator  admin@${DOMAIN}`);
   console.log(`  IT Operator    it1@${DOMAIN}`);
-  console.log(`  Branch user    br01@${DOMAIN}  (Connaught Place) … br15@${DOMAIN}`);
+  console.log(`  Branch user    br01@${DOMAIN}  (Kochi Kakkanad) … br15@${DOMAIN}`);
 }
 
 main()

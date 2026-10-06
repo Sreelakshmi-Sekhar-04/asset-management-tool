@@ -11,7 +11,7 @@ interface S {
 const NOTIF: Record<string, string> = {
   TRANSFER_APPROVAL_REQUESTED: 'Transfer awaiting approval', TRANSFER_DECIDED: 'Transfer approved or rejected', TRANSFER_IN_TRANSIT: 'Transfer dispatched (to receiver)', TRANSFER_EXCEPTION: 'Transfer line not received',
   TRANSFER_RECEIVED: 'Transfer lines received', TRANSFER_COMPLETED: 'Transfer completed', TRANSFER_AGING: 'Transfer overdue in transit', APPROVAL_REQUESTED: 'Approval requested', APPROVAL_DECIDED: 'Approval decided',
-  VERIFICATION: 'Verification tasks and reminders', RENEWAL: 'Renewal reminders', INTEGRATION_FAILURE: 'Integration failures', IMPORT_COMPLETED: 'Import finished',
+  VERIFICATION: 'Campaign tasks and reminders', RENEWAL: 'Renewal reminders', INTEGRATION_FAILURE: 'Integration failures', IMPORT_COMPLETED: 'Import finished',
 };
 
 export default function SettingsPage() {
@@ -58,7 +58,7 @@ export default function SettingsPage() {
           {(['hostname', 'ip'] as const).map((k) => <Field key={k} label={`Duplicate ${k === 'ip' ? 'IP address' : 'hostname'}`}><select className="input" value={s.duplicateRules[k]} onChange={(e) => setS({ ...s, duplicateRules: { ...s.duplicateRules, [k]: e.target.value } })}><option value="BLOCK">Block</option><option value="WARN">Warn and ask for a reason</option><option value="OFF">Allow</option></select></Field>)}
           <Field label="Transfer aging threshold (days in transit)"><input {...num('transferAgingDays')} min={1} max={365} /></Field>
           <Field label="Scanner advance key"><select className="input" value={s.scannerAdvanceKey} onChange={(e) => setS({ ...s, scannerAdvanceKey: e.target.value as 'Enter' })}><option>Enter</option><option>Tab</option></select></Field>
-          <Field label="Verification reminders (days before due)"><input className="input" value={verDays} onChange={(e) => setVerDays(e.target.value)} /></Field>
+          <Field label="Campaign reminders (days before due)"><input className="input" value={verDays} onChange={(e) => setVerDays(e.target.value)} /></Field>
         </div>
       </Card>
       <Card title="Documents">

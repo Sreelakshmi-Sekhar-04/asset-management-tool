@@ -111,7 +111,7 @@ export default function AssetIdsPage() {
         <fieldset>
           <legend className="field-label">What the QR code holds</legend>
           <label className="flex items-start gap-2 text-sm"><input type="radio" className="mt-1" checked={l.qrContent === 'ASSET_ID'} onChange={() => setL({ ...l, qrContent: 'ASSET_ID' })} />
-            <span>The Asset ID only <span className="block text-xs text-slate-500">Works with any scanner and never goes out of date. Scan it with Scan asset, a USB scanner in the search box, or during verification.</span></span></label>
+            <span>The Asset ID only <span className="block text-xs text-slate-500">Works with any scanner and never goes out of date. Scan it with Scan asset, a USB scanner in the search box, or during a campaign.</span></span></label>
           <label className="mt-2 flex items-start gap-2 text-sm"><input type="radio" className="mt-1" checked={l.qrContent === 'LINK'} onChange={() => setL({ ...l, qrContent: 'LINK' })} />
             <span>A link to the asset <span className="block text-xs text-slate-500">A phone&apos;s own camera opens the asset after sign-in: <span className="font-mono">{data.appUrl.replace(/\/+$/, '')}/scan/AST-000001</span>. Labels stop opening from a phone camera if this address changes, but still scan inside the app.</span></span></label>
         </fieldset>

@@ -97,7 +97,7 @@ export function useAssetColumnFilters(ls: ListState) {
 
 export const Dash = () => <span className="text-slate-300">—</span>;
 
-/** "West / Gujarat / Surat" → Surat in bold with "West · Gujarat" beneath. */
+/** "South / Kerala / Kochi" → Kochi in bold with "South · Kerala" beneath. */
 export function LocationCell({ path }: { path: string | null }) {
   if (!path) return <Dash />;
   const parts = path.split(' / ');
