@@ -18,7 +18,7 @@ function Inner() {
       <PageHeader title="Notifications" subtitle={data ? `${data.unread} unread` : undefined} actions={data?.unread ? <button className="btn" onClick={() => read('all')}>Mark all read</button> : null} />
       <label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={ls.get('unread') === 'true'} onChange={(e) => ls.set('unread', e.target.checked ? 'true' : '')} />Unread only</label>
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No notifications."
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="No notifications."
         columns={[
           { key: 'title', header: 'Notification', render: (n) => (
             <div className={n.readAt ? 'text-slate-500' : ''}>

@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/lib/paging';
 import { api, qs, useApi } from './api';
 import { ColumnFilterButton, type ColumnFilterDef } from './column-filter';
 import { Empty, Spinner, useToast } from './ui';
@@ -27,7 +28,7 @@ export function useListState(defaults: Record<string, string> = {}) {
   const set = useCallback((k: string, v: string | string[] | null | undefined) => setMany({ [k]: v }), [setMany]);
   const query = sp.toString();
   const page = Number(sp.get('page') ?? 1) || 1;
-  const pageSize = Number(sp.get('pageSize') ?? defaults.pageSize ?? 50) || 50;
+  const pageSize = Number(sp.get('pageSize') ?? defaults.pageSize ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE;
   const sort = sp.get('sort') ?? defaults.sort ?? '';
   const dir = (sp.get('dir') ?? defaults.dir ?? 'asc') as 'asc' | 'desc';
   /** Query string for the API, merged with defaults (defaults apply only when the URL lacks the key). */
@@ -129,7 +130,7 @@ export function DataTable<T extends { id?: string }>({
         <div className="flex items-center gap-2">
           {onPageSize && (
             <select className="input w-auto py-0.5 text-xs" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page">
-              {[25, 50, 100, 250, 500].map((n) => <option key={n} value={n}>{n} / page</option>)}
+              {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n} / page</option>)}
             </select>
           )}
           <button className="btn btn-sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>Prev</button>

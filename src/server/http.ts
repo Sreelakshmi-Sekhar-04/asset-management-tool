@@ -3,6 +3,7 @@ import { cookies, headers } from 'next/headers';
 import type { Role } from '@prisma/client';
 import { z, ZodError } from 'zod';
 import { AppError, badRequest, forbidden, toAppError, unauthorized } from '@/lib/errors';
+import { DEFAULT_PAGE_SIZE } from '@/lib/paging';
 import type { Actor } from './actor';
 import { actorFromToken, SESSION_COOKIE } from './auth/session';
 import { audit } from './audit';
@@ -114,10 +115,10 @@ export async function body<T extends z.ZodTypeAny>(req: Request, schema: T): Pro
   return schema.parse(raw);
 }
 
-/** Parse query params: page, pageSize (default 50), sort, dir. */
+/** Parse query params: page, pageSize (default DEFAULT_PAGE_SIZE), sort, dir. */
 export function paging(url: URL, defaults: { sort?: string } = {}) {
   const page = Math.max(1, Number(url.searchParams.get('page') ?? 1) || 1);
-  const pageSize = Math.min(500, Math.max(1, Number(url.searchParams.get('pageSize') ?? 50) || 50));
+  const pageSize = Math.min(500, Math.max(1, Number(url.searchParams.get('pageSize') ?? DEFAULT_PAGE_SIZE) || DEFAULT_PAGE_SIZE));
   const sort = url.searchParams.get('sort') ?? defaults.sort;
   const dir: 'asc' | 'desc' = url.searchParams.get('dir') === 'asc' ? 'asc' : 'desc';
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize, sort, dir };

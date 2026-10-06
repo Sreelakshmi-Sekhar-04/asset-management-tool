@@ -20,7 +20,7 @@ export function InboundView() {
         <label className="flex items-center gap-2"><input type="checkbox" checked={ls.get('includeClosed') === 'true'} onChange={(e) => ls.set('includeClosed', e.target.checked ? 'true' : null)} />Include completed</label>
       </div>
       <ErrorBox error={error} className="mb-3" />
-      <DataTable columns={transferColumns(s?.transferAgingDays)} rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="Nothing in transit to you." />
+      <DataTable columns={transferColumns(s?.transferAgingDays)} rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="Nothing in transit to you." />
     </div>
   );
 }
@@ -48,7 +48,7 @@ export function ExceptionsView() {
           <button className="btn btn-sm btn-danger" onClick={() => { setRes('WRITTEN_OFF'); setNote(''); }}>Write off</button>
         </>}
       </div>
-      <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+      <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
         selection={me.isIT ? sel : undefined} onSelection={setSel}
         columns={[
           { key: 'transfer', header: 'Transfer', render: (r) => <Link href={`/transfers/${r.line.transfer.id}`}>{r.line.transfer.transferNo}</Link> },

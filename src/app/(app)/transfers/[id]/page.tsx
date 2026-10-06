@@ -10,6 +10,7 @@ import { DocumentsPanel } from '@/components/documents';
 import { DataTable, FilterSelect } from '@/components/list';
 import { useMe } from '@/components/me';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, Tabs, useConfirm, useToast } from '@/components/ui';
+import { DEFAULT_PAGE_SIZE } from '@/lib/paging';
 
 interface Tr {
   id: string; transferNo: string; status: string; reason: string; remarks: string | null; interState: boolean; recordedLate: boolean; requestedByName: string; requestedAt: string; submittedAt: string | null; effectiveDate: string;
@@ -32,7 +33,8 @@ export default function TransferDetail() {
   const [tab, setTab] = useState('lines');
   const [lineStatus, setLineStatus] = useState('');
   const [page, setPage] = useState(1);
-  const { data: lines, loading: linesLoading, reload: reloadLines } = useApi<{ rows: Line[]; total: number }>(t ? `/api/transfers/${t.id}/lines${qs({ status: lineStatus, page, pageSize: 100 })}` : null, [t?.status]);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const { data: lines, loading: linesLoading, reload: reloadLines } = useApi<{ rows: Line[]; total: number }>(t ? `/api/transfers/${t.id}/lines${qs({ status: lineStatus, page, pageSize })}` : null, [t?.status]);
   const [receiving, setReceiving] = useState(false);
   const [decision, setDecision] = useState<'' | 'APPROVE' | 'REJECT'>('');
   const [comment, setComment] = useState('');
@@ -94,7 +96,7 @@ export default function TransferDetail() {
         : (
           <div>
             <div className="mb-2"><FilterSelect label="Line status" value={lineStatus} onChange={(v) => { setLineStatus(v); setPage(1); }} options={['IN_TRANSIT', 'RECEIVED', 'NOT_RECEIVED', 'RECALLED', 'PENDING_APPROVAL', 'DRAFT', 'CANCELLED'].map((s) => ({ value: s, label: s.replace('_', ' ').toLowerCase() }))} /></div>
-            <DataTable rows={lines?.rows ?? []} total={lines?.total ?? 0} loading={linesLoading} page={page} pageSize={100} onPage={setPage}
+            <DataTable rows={lines?.rows ?? []} total={lines?.total ?? 0} loading={linesLoading} page={page} pageSize={pageSize} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }}
               columns={[
                 { key: 'assetCode', header: 'Asset ID', render: (l) => <Link href={`/assets/${l.assetId}`}>{l.assetCode}</Link> },
                 { key: 'serialNumber', header: 'Serial', render: (l) => l.serialNumber ?? '—' },

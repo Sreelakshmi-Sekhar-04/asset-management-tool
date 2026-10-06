@@ -47,7 +47,7 @@ export default function Campaigns() {
       </Card>
       <div>
         <h2 className="mb-2">{me.isBranch ? 'My campaign tasks' : 'Branch tasks'}</h2>
-        <DataTable rows={tasks?.rows ?? []} total={tasks?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+        <DataTable rows={tasks?.rows ?? []} total={tasks?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
           toolbar={cf.strip()}
           columns={[
             { key: 'branch', header: 'Branch', filter: me.isBranch ? undefined : cf.location('locationId', 'Branch'), render: (r) => <Link href={`/campaigns/tasks/${r.id}`} className="font-medium">{r.location.namePath}</Link> },

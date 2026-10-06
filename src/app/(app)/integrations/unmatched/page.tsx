@@ -26,7 +26,7 @@ function Inner() {
     <div className="space-y-4">
       <PageHeader back={{ href: '/integrations', label: 'Integrations' }} title="Unmatched device records" subtitle="Records a source sent that match no asset by serial number (or the configured secondary key)." />
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="Nothing unmatched."
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="Nothing unmatched."
         toolbar={f.strip()}
         columns={[
           { key: 'serial', header: 'Serial', render: (u) => u.serialNumber ?? '—' },

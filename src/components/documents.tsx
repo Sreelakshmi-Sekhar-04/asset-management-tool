@@ -11,7 +11,7 @@ const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB
 /** Attachments for any record (FR-DOC). Upload is validated and scanned server-side. */
 export function DocumentsPanel({ entityType, entityId, canUpload = true, isAdmin = false, title = 'Documents' }: { entityType: string; entityId: string; canUpload?: boolean; isAdmin?: boolean; title?: string }) {
   const [showDeleted, setShowDeleted] = useState(false);
-  const { data, loading, reload } = useApi<{ rows: Doc[] }>(`/api/documents${qs({ entityType, entityId, includeDeleted: showDeleted ? 'true' : undefined })}`, [showDeleted]);
+  const { data, loading, reload } = useApi<{ rows: Doc[] }>(`/api/documents${qs({ entityType, entityId, includeDeleted: showDeleted ? 'true' : undefined, pageSize: 500 })}`, [showDeleted]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
   const [del, setDel] = useState<Doc | null>(null);

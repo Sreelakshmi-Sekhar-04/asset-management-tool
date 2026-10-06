@@ -61,7 +61,7 @@ function Inner() {
       ))}
       {tab === 'runs' && (
         <>
-          <DataTable loading={runs.loading} rows={runs.data?.rows ?? []} total={runs.data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+          <DataTable loading={runs.loading} rows={runs.data?.rows ?? []} total={runs.data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
             toolbar={f.strip()}
             columns={[
               { key: 'startedAt', header: 'Started', className: 'whitespace-nowrap', render: (r) => <Link href={`/integrations/runs/${r.id}`}>{fmtDateTime(r.startedAt)}</Link> },

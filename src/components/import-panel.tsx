@@ -76,7 +76,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
       {assetsOnly ? <PendingAssetImports rows={data?.rows ?? []} error={error} /> : <>
         <div className="flex gap-2"><FilterSelect label="Type" value={ls.get('type')} onChange={(v) => ls.set('type', v)} options={Object.entries(IMPORT_TYPE).map(([value, label]) => ({ value, label }))} /></div>
         <ErrorBox error={error} />
-        <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No imports yet."
+        <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="No imports yet."
           columns={[
             { key: 'createdAt', header: 'Started', className: 'whitespace-nowrap', render: (r) => <Link href={`/imports/${r.id}`}>{fmtDateTime(r.createdAt)}</Link> },
             { key: 'fileName', header: 'File', render: (r) => <Link href={`/imports/${r.id}`}>{r.fileName}</Link> },
