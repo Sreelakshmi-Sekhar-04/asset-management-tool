@@ -28,7 +28,7 @@ function Inner() {
     <div className="space-y-4">
       <PageHeader title="Documents" subtitle="Files attached to assets, transfers, renewals and campaign tasks you can see. Upload files from the record they belong to." />
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No documents."
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="No documents."
         toolbar={f.strip()}
         columns={[
           { key: 'fileName', header: 'File', filter: fileFilter, render: (d) => <span><a href={`/api/documents/${d.id}/download`} className={d.deletedAt ? 'line-through' : ''}>{d.fileName}</a>{(d.scanStatus === 'INFECTED' || d.scanStatus === 'ERROR') && <Badge tone="red"> scan {d.scanStatus.toLowerCase()}</Badge>}{d.description && <div className="text-xs text-slate-500">{d.description}</div>}</span> },

@@ -27,7 +27,7 @@ export default function RenewablePage() {
   const me = useMe();
   const toast = useToast();
   const { data: r, error, reload } = useApi<R>(`/api/renewables/${id}`);
-  const docs = useApi<{ rows: Doc[] }>(`/api/documents?entityType=RENEWABLE&entityId=${id}`);
+  const docs = useApi<{ rows: Doc[] }>(`/api/documents?entityType=RENEWABLE&entityId=${id}&pageSize=500`);
   const [dlg, setDlg] = useState<'' | 'edit' | 'renew' | 'ack' | 'snooze' | 'cancel'>('');
   const [f, setF] = useState({ newExpiry: '', cost: '', proof: '', note: '', until: '', reason: '' });
   const initial = useMemo<RenewableValues | undefined>(() => r ? {

@@ -40,7 +40,7 @@ export default function Approvals() {
           <button className="btn btn-sm btn-danger" onClick={() => { setBulk('REJECT'); setComment(''); }}>Reject {ids.length}</button>
         </div>
       )}
-      <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+      <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
         selection={view === 'actionable' ? sel : undefined} onSelection={setSel} empty={view === 'actionable' ? 'Nothing is waiting for you.' : 'No requests.'}
         toolbar={f.strip()}
         columns={[

@@ -23,7 +23,7 @@ export default function DiscrepanciesPage() {
     <div className="space-y-4">
       <PageHeader back={{ href: '/campaigns', label: 'Campaigns' }} title="Campaign discrepancies" subtitle="Missing and wrong-details findings, and unlisted assets, across your branches" />
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)}
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
         empty="No discrepancies match."
         toolbar={f.strip()}
         columns={[

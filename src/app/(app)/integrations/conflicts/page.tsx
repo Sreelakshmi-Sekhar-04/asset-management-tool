@@ -26,7 +26,7 @@ function Inner() {
     <div className="space-y-4">
       <PageHeader back={{ href: '/integrations', label: 'Integrations' }} title="Integration conflicts" subtitle="A source sent a value that differs from one entered or owned elsewhere. Choose which value to keep." />
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No conflicts."
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="No conflicts."
         toolbar={f.strip()}
         columns={[
           { key: 'record', header: 'Record', render: (c) => <Link href={c.entityType === 'ASSET' ? `/assets/${c.entityId}` : `/employees/${c.entityId}`}>{c.entityLabel}</Link> },

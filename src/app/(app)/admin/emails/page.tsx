@@ -19,7 +19,7 @@ function Inner() {
     <div className="space-y-4">
       <PageHeader title="Email outbox" subtitle="Every email the system queues. Failed sends retry automatically with back-off; without SMTP configured, development logs them and production marks them failed." />
       <ErrorBox error={error} />
-      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} empty="No emails."
+      <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} empty="No emails."
         toolbar={f.strip()}
         columns={[
           { key: 'createdAt', header: 'Queued', className: 'whitespace-nowrap', render: (e) => fmtDateTime(e.createdAt) },

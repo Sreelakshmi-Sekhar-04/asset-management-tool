@@ -32,7 +32,7 @@ export default function TaskPage() {
   const me = useMe();
   const toast = useToast();
   const { confirm, node } = useConfirm();
-  const ls = useListState({ tab: 'checklist', pageSize: '100' });
+  const ls = useListState({ tab: 'checklist' });
   const cf = useColumnFilters(ls);
   const tab = ls.get('tab');
   const { data: t, error, reload } = useApi<Task>(`/api/verification/tasks/${id}`);
