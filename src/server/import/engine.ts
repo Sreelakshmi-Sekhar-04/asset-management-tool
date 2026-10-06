@@ -150,10 +150,31 @@ export async function getImport(actor: Actor, id: string) {
 }
 
 export async function importRows(actor: Actor, id: string, p: { outcome?: string; skip: number; take: number }) {
-  await getImport(actor, id);
+  const job = await getImport(actor, id);
   const where: Prisma.ImportRowWhereInput = { jobId: id, ...(p.outcome ? { outcome: p.outcome as RowResult<unknown>['outcome'] } : {}) };
   const [rows, total] = await Promise.all([prisma.importRow.findMany({ where, orderBy: { rowNumber: 'asc' }, skip: p.skip, take: p.take }), prisma.importRow.count({ where })]);
-  return { rows, total };
+  if (job.type !== 'ASSETS') return { rows, total };
+  return { rows: await withAssetView(rows), total };
+}
+
+/**
+ * Adds what the asset register would show for each row, so the preview reads like the register:
+ * the holder's name, and for rows that match or created an asset, its Asset ID and current status.
+ */
+async function withAssetView<R extends { data: Prisma.JsonValue; outcome: string; matchedId: string | null; resultId: string | null }>(rows: R[]) {
+  const codes = [...new Set(rows.map((r) => String((r.data as Record<string, string>).holderemployeeid ?? '').trim().toLowerCase()).filter(Boolean))];
+  const assetIds = [...new Set(rows.flatMap((r) => [r.resultId, r.matchedId]).filter((x): x is string => !!x))];
+  const [emps, assets] = await Promise.all([
+    codes.length ? prisma.employee.findMany({ where: { employeeCode: { in: codes, mode: 'insensitive' } }, select: { employeeCode: true, name: true } }) : [],
+    assetIds.length ? prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, assetCode: true, status: true } }) : [],
+  ]);
+  const empName = new Map(emps.map((e) => [e.employeeCode.toLowerCase(), e.name]));
+  const byId = new Map(assets.map((a) => [a.id, a]));
+  return rows.map((r) => {
+    const code = String((r.data as Record<string, string>).holderemployeeid ?? '').trim();
+    const a = byId.get(r.resultId ?? '') ?? byId.get(r.matchedId ?? '') ?? null;
+    return { ...r, view: { holderName: code ? empName.get(code.toLowerCase()) ?? null : null, asset: a } };
+  });
 }
 
 /** FR-IMP-05: every row with its original row number, outcome and reason, as CSV. */

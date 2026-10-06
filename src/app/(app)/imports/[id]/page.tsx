@@ -4,14 +4,12 @@ import { Suspense, useEffect, useState } from 'react';
 import { fmtDateTime } from '@/lib/format';
 import { api, download, qs, useApi } from '@/components/api';
 import { IMPORT_TYPE, ImportStatus, RUNNING } from '@/components/import-status';
+import { importAssetColumns, OUT_LABEL, OUT_TONE, type ImportAssetRow } from '@/components/import-asset-rows';
 import { DataTable, useListState } from '@/components/list';
 import { Badge, Card, ErrorBox, Field, PageHeader, Spinner, Stat, useConfirm, useToast } from '@/components/ui';
 
 interface Job { id: string; type: string; mode: string; createMissing: boolean; fileName: string; status: string; totalRows: number; processedRows: number; counts: Record<string, number>; locationsToCreate: string[]; departmentsToCreate: string[]; warningReason: string | null; error: string | null; createdByName: string; createdAt: string; validatedAt: string | null; committedAt: string | null; reportPurgedAt: string | null }
-interface Row { id: string; rowNumber: number; data: Record<string, string>; outcome: string; messages: string[]; resultCode: string | null }
-
-const OUT_TONE: Record<string, string> = { CREATED: 'green', UPDATED: 'blue', UNCHANGED: 'gray', WARNING: 'amber', REJECTED: 'red' };
-const OUT_LABEL: Record<string, string> = { CREATED: 'Create', UPDATED: 'Update', UNCHANGED: 'Unchanged', WARNING: 'Warning', REJECTED: 'Rejected' };
+type Row = ImportAssetRow;
 
 function Inner() {
   const { id } = useParams<{ id: string }>();
@@ -41,7 +39,7 @@ function Inner() {
   return (
     <div className="space-y-4">
       {node}
-      <PageHeader back={{ href: '/imports', label: 'Imports' }} title={job.fileName}
+      <PageHeader back={job.type === 'ASSETS' ? { href: '/assets/bulk-add?tab=excel', label: 'Bulk add / Import' } : { href: '/imports', label: 'Imports' }} title={job.fileName}
         subtitle={<span className="flex flex-wrap items-center gap-2">{IMPORT_TYPE[job.type]} · {job.mode === 'CREATE_ONLY' ? 'create new only' : 'create or update'} · by {job.createdByName} {fmtDateTime(job.createdAt)} <ImportStatus s={job.status} /></span>}
         actions={<>
           {!running && job.totalRows > 0 && !job.reportPurgedAt && <button className="btn" onClick={() => download(`/api/imports/${id}/report`).catch((e) => toast(e.message, 'err'))}>Download row report</button>}
@@ -88,7 +86,7 @@ function Inner() {
             ))}
           </div>
           <DataTable loading={rows.loading} rows={rows.data.rows} total={rows.data.total} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
-            columns={[
+            columns={job.type === 'ASSETS' ? importAssetColumns() : [
               { key: 'rowNumber', header: 'Row', render: (r) => r.rowNumber },
               { key: 'outcome', header: 'Result', render: (r) => <Badge tone={OUT_TONE[r.outcome]}>{OUT_LABEL[r.outcome]}</Badge> },
               { key: 'messages', header: 'Reason', render: (r) => <span className="text-xs">{r.messages.join(' ')}</span> },

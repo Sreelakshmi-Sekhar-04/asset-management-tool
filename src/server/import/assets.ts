@@ -97,7 +97,12 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
     fpCount.set(base, occ);
     plan.fingerprint = `${base}#${occ}`;
 
-    if (msgs.length) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'REJECTED', messages: msgs, plan }); await tick(i); continue; }
+    if (msgs.length) {
+      // Say up front that the serial is already registered, so it is not found only after the other errors are fixed.
+      const taken = ctx.mode === 'CREATE_ONLY' && serial ? bySerial.get(serial.toLowerCase()) : undefined;
+      if (taken) msgs.push(`Duplicate: serial ${serial} already exists on ${taken.assetCode}${taken.status === 'RETIRED' ? ' (retired)' : ''}.`);
+      results.push({ rowNumber: r.rowNumber, data: d, outcome: 'REJECTED', messages: msgs, matchedId: taken?.id, plan }); await tick(i); continue;
+    }
 
     // Match existing: serial first, then legacy tag.
     const match = (serial && bySerial.get(serial.toLowerCase())) || (tag && byTag.get(tag.toLowerCase())) || null;

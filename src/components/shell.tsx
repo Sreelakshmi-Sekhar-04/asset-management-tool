@@ -16,8 +16,7 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/assets', label: 'Asset register' },
     { href: '/scan', label: 'Scan asset' },
     { href: '/assets/scan-register', label: 'Scan to register', roles: IT },
-    { href: '/assets/bulk-add', label: 'Bulk add', roles: IT },
-    { href: '/imports', label: 'Import', roles: IT },
+    { href: '/assets/bulk-add', label: 'Bulk add / Import', roles: IT },
     { href: '/employees', label: 'Employees' },
   ] },
   { group: 'Transfers', items: [
@@ -64,7 +63,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     window.addEventListener('itam:notifications', tick);
     return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
   }, [pathname]);
-  const isActive = (href: string) => (href === '/' ? pathname === '/' : pathname === href || (pathname.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && pathname.startsWith(i.href)))));
+  const isActive = (href: string) => (href === '/' ? pathname === '/' : href === '/assets/bulk-add' && pathname.startsWith('/imports') ? true : pathname === href || (pathname.startsWith(`${href}/`) && !NAV.some((g) => g.items.some((i) => i.href !== href && i.href.startsWith(href) && pathname.startsWith(i.href)))));
   const logout = async () => { await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined); window.location.href = '/login'; };
   // Groups fold so the menu fits the screen: the group holding the current page is always
   // open; others open on click and stay as the user left them.

@@ -1,12 +1,14 @@
 'use client';
 import Link from 'next/link';
-import { useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useRef, useState } from 'react';
 import { api, ApiError } from '@/components/api';
 import { CameraScanner } from '@/components/camera-scanner';
+import { ImportPanel } from '@/components/import-panel';
 import { PrintLabelsDialog } from '@/components/labels';
 import { CategorySelect, LocationSelect, useCategories } from '@/components/pickers';
 import { useScannerAdvance } from '@/components/scanner';
-import { Card, ErrorBox, Field, PageHeader, Spinner, useToast } from '@/components/ui';
+import { Card, ErrorBox, Field, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
 
 type Row = { serialNumber: string; hostname: string };
 type ScanNote = { n: number; text: string; tone: 'green' | 'amber' | 'red' };
@@ -15,7 +17,30 @@ type Registered = Record<string, { id: string; assetCode: string } | null>;
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-export default function BulkAdd() {
+const TABS = [
+  { key: 'serials', label: 'Scan or type serials', subtitle: 'Many devices of the same make and model: enter the common details once, then scan each serial-number barcode with the camera or a USB or Bluetooth scanner, or type it.' },
+  { key: 'excel', label: 'Upload Excel / CSV', subtitle: 'An existing list or a supplier’s delivery sheet, with different models per row. A dry run shows every row, in the asset register’s columns, before anything is saved.' },
+];
+
+/** One page for adding many assets at once: scan or type serials, or upload a spreadsheet. */
+function BulkAddOrImport() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const tab = sp.get('tab') === 'excel' ? 'excel' : 'serials';
+  const t = TABS.find((x) => x.key === tab)!;
+  return (
+    <div className="max-w-5xl space-y-4">
+      <PageHeader title="Bulk add / Import" subtitle={t.subtitle} back={{ href: '/assets', label: 'Asset register' }} />
+      <Tabs tabs={TABS} value={tab} onChange={(k) => router.replace(k === 'serials' ? pathname : `${pathname}?tab=${k}`, { scroll: false })} />
+      {tab === 'excel' ? <ImportPanel assetsOnly /> : <ScanSerials />}
+    </div>
+  );
+}
+
+export default function BulkAddPage() { return <Suspense><BulkAddOrImport /></Suspense>; }
+
+function ScanSerials() {
   const toast = useToast();
   const advance = useScannerAdvance();
   const { data: cats } = useCategories();
@@ -93,8 +118,7 @@ export default function BulkAdd() {
   };
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   return (
-    <div className="max-w-5xl space-y-4">
-      <PageHeader title="Bulk add by model × quantity" subtitle="Scan each device's serial-number barcode with the camera, or with a USB or Bluetooth scanner into the rows. Serials can also be typed." back={{ href: '/assets', label: 'Asset register' }} />
+    <div className="space-y-4">
       <Card title="1. Common details">
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Category" required><CategorySelect value={f.categoryId} onChange={(id) => setF((x) => ({ ...x, categoryId: id }))} /></Field>
