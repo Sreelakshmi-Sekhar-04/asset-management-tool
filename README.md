@@ -52,6 +52,8 @@ Full instructions: [docs/SETUP.md](docs/SETUP.md).
 | `npm run worker` | Background worker (imports, email, reminders, schedules, integrations) |
 | `npm run db:migrate` | Apply migrations (`prisma migrate deploy`) |
 | `npm run db:seed` | Demo data, development only |
+| `npm run db:reset-demo -- --yes` | Deletes all data and loads 5 of each record, development only |
+| `npm run db:trim-assets -- --yes` | Keeps 5 assets and deletes the rest with their transfers, development only |
 | `npm run db:generate-volume -- --assets 20000` | Volume data for performance testing, development only |
 | `npm test` | Automated tests against a disposable `*_test` database |
 | `npm run perf:check` | Times the NFR-02 targets against a volume database |
