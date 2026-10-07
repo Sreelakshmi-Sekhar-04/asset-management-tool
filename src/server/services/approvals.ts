@@ -2,7 +2,7 @@ import type { ApprovalAction, ApprovalPolicy, ApprovalStep, ApprovalRequest, Pri
 import { z } from 'zod';
 import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
-import { APPROVAL_ACTION_LABEL } from '@/lib/labels';
+import { HISTORIC_ACTION_LABEL } from '@/lib/labels';
 import type { Actor } from '../actor';
 import { resolveOrg } from '../org';
 import { audit } from '../audit';
@@ -162,7 +162,7 @@ async function notifyApprovers(db: Db, requestId: string, link?: string) {
   await notifyUsers(db, [...ids], {
     type: req.action === 'TRANSFER' ? 'TRANSFER_APPROVAL_REQUESTED' : 'APPROVAL_REQUESTED',
     title: `Approval needed: ${req.summary}`,
-    body: `${req.initiatorName} requested ${APPROVAL_ACTION_LABEL[req.action].toLowerCase()} (${req.requestNo}). Policy: ${req.policyName}.`,
+    body: `${req.initiatorName} requested ${(HISTORIC_ACTION_LABEL[req.action] ?? req.action).toLowerCase()} (${req.requestNo}). Policy: ${req.policyName}.`,
     link: link ?? `/approvals?request=${req.id}`,
     eventKey: `approval:${req.id}:order:${req.currentOrder}`,
   });
@@ -170,7 +170,8 @@ async function notifyApprovers(db: Db, requestId: string, link?: string) {
 
 export function canActOnTask(actor: Actor, req: Pick<ApprovalRequest, 'initiatorId' | 'action'>, task: { status: string; approverType: string; approverUserId: string | null; approverRole: Role | null }) {
   if (task.status !== 'PENDING') return false;
-  if (actor.role === 'BRANCH_USER' && req.action === 'TRANSFER') return false; // branches never approve transfers
+  // Branch users approve a transfer only as the destination's named location manager.
+  if (actor.role === 'BRANCH_USER' && req.action === 'TRANSFER' && !(task.approverType === 'USER' && task.approverUserId === actor.id)) return false;
   if (req.initiatorId === actor.id && actor.role !== 'ADMIN') return false; // no self-approval except Administrator
   if (task.approverType === 'USER') return task.approverUserId === actor.id;
   if (task.approverType === 'ROLE') return task.approverRole === actor.role || (task.approverRole === 'IT_OPERATOR' && actor.role === 'ADMIN');
@@ -181,6 +182,8 @@ export function canActOnTask(actor: Actor, req: Pick<ApprovalRequest, 'initiator
 
 type Handler = {
   execute: (t: Prisma.TransactionClient, initiator: Actor, req: ApprovalRequest, approvers: string, decider: Actor) => Promise<void>;
+  /** A step was approved and the request moved on to the next one. */
+  onAdvanced?: (t: Prisma.TransactionClient, req: ApprovalRequest, nextOrder: number) => Promise<void>;
   onRejected?: (t: Prisma.TransactionClient, actor: Actor, req: ApprovalRequest, comment: string) => Promise<void>;
   onCancelled?: (t: Prisma.TransactionClient, actor: Actor, req: ApprovalRequest) => Promise<void>;
 };
@@ -233,6 +236,7 @@ export async function decide(actor: Actor, requestId: string, decision: 'APPROVE
     if (next) {
       await t.approvalTask.updateMany({ where: { requestId: req.id, stepOrder: next.stepOrder }, data: { status: 'PENDING' } });
       await t.approvalRequest.update({ where: { id: req.id }, data: { currentOrder: next.stepOrder } });
+      await handler.onAdvanced?.(t, req, next.stepOrder);
       await notifyApprovers(t, req.id);
       return { status: 'PENDING' as const, requestNo: req.requestNo };
     }
@@ -241,9 +245,7 @@ export async function decide(actor: Actor, requestId: string, decision: 'APPROVE
     const initiator = await actorForUser(t, req.initiatorId);
     await handler.execute(t, initiator, approved, approvers, actor);
     await audit(t, actor, { action: 'APPROVAL_EXECUTED', entityType: 'ApprovalRequest', entityId: req.id, entityLabel: req.requestNo, details: { action: req.action, approvers }, locationIds: req.locationIds });
-    if (req.action !== 'TRANSFER') {
-      await notifyUsers(t, [req.initiatorId], { type: 'APPROVAL_DECIDED', title: `Approved: ${req.summary}`, body: `${req.requestNo} was approved by ${approvers} and has been applied.`, link: `/approvals?request=${req.id}`, eventKey: `approval:${req.id}:approved` });
-    }
+    await notifyUsers(t, [req.initiatorId], { type: req.action === 'TRANSFER' ? 'TRANSFER_DECIDED' : 'APPROVAL_DECIDED', title: `Approved: ${req.summary}`, body: `${req.requestNo} was approved by ${approvers} and has been applied.`, link: `/approvals?request=${req.id}`, eventKey: `approval:${req.id}:approved` });
     return { status: 'APPROVED' as const, requestNo: req.requestNo };
   }, { timeoutMs: 120_000 });
 }
@@ -269,7 +271,7 @@ export async function reassignTask(actor: Actor, requestId: string, toUserId: st
     const to = await t.user.findUnique({ where: { id: toUserId } });
     if (!to || !to.active) throw badRequest('The selected user does not exist or is inactive.');
     if (to.id === req.initiatorId && to.role !== 'ADMIN') throw badRequest('A request cannot be reassigned to its initiator.');
-    if (req.action === 'TRANSFER' && to.role === 'BRANCH_USER') throw badRequest('Transfers can only be approved by IT.');
+    if (req.action === 'TRANSFER' && to.role === 'BRANCH_USER' && task.stepOrder === 1) throw badRequest('The first transfer approval is given by an Administrator.');
     await t.approvalTask.update({ where: { id: task.id }, data: { approverType: 'USER', approverUserId: to.id, approverRole: null, reassignedFromUserId: actor.id, comment: comment ?? null } });
     await audit(t, actor, { action: 'APPROVAL_REASSIGNED', entityType: 'ApprovalRequest', entityId: req.id, entityLabel: req.requestNo, details: { to: to.email, comment }, locationIds: req.locationIds });
     await notifyUsers(t, [to.id], { type: 'APPROVAL_REQUESTED', title: `Approval reassigned to you: ${req.summary}`, body: `${actor.name} reassigned ${req.requestNo} to you.`, link: `/approvals?request=${req.id}`, eventKey: `approval:${req.id}:reassign:${task.id}:${to.id}` });
@@ -294,9 +296,11 @@ export async function cancelRequest(actor: Actor, requestId: string) {
 
 // ───────────── Visibility / inbox (FR-APR-05) ─────────────
 
-export async function canSeeRequest(actor: Actor, req: Pick<ApprovalRequest, 'initiatorId' | 'locationIds'>) {
+export async function canSeeRequest(actor: Actor, req: Pick<ApprovalRequest, 'initiatorId' | 'locationIds'> & { tasks?: { approverUserId: string | null }[] }) {
   if (actor.role !== 'BRANCH_USER') return true;
   if (req.initiatorId === actor.id) return true;
+  // A named approver (a destination's location manager) sees the request they decide.
+  if (req.tasks?.some((x) => x.approverUserId === actor.id)) return true;
   if (!req.locationIds.length) return false;
   const locs = await prisma.location.findMany({ where: { id: { in: req.locationIds } }, select: { idPath: true } });
   return locs.length > 0 && locs.every((l) => l.idPath.startsWith(actor.scopeIdPath ?? '/__none__/'));
@@ -311,7 +315,7 @@ export async function listRequests(actor: Actor, p: { status?: string; action?: 
   if (actor.role === 'BRANCH_USER') {
     // Branch users see requests they raised, or that concern only their own branch.
     const scopeIds = (await prisma.location.findMany({ where: { idPath: { startsWith: actor.scopeIdPath! } }, select: { id: true } })).map((l) => l.id);
-    where.OR = [{ initiatorId: actor.id }, { locationIds: { hasSome: scopeIds } }];
+    where.OR = [{ initiatorId: actor.id }, { locationIds: { hasSome: scopeIds } }, { tasks: { some: { approverUserId: actor.id } } }];
   }
   const rows = await prisma.approvalRequest.findMany({ where, include: { tasks: { orderBy: { stepOrder: 'asc' } } }, orderBy: { createdAt: 'desc' }, skip: p.actionable ? 0 : p.skip, take: p.actionable ? 5000 : p.take });
   let visible = [];

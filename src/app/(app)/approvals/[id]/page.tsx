@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { fmtDateTime } from '@/lib/format';
 import { HISTORIC_ACTION_LABEL, label } from '@/lib/labels';
 import { api, useApi } from '@/components/api';
-import { ApprovalChain, type ApprovalReq } from '@/components/approval-chain';
+import { ApprovalChain, pendingStage, type ApprovalReq } from '@/components/approval-chain';
 import { useMe } from '@/components/me';
 import { UserSelect } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useToast } from '@/components/ui';
@@ -25,7 +25,7 @@ export default function ApprovalDetail() {
   if (!r) return <div className="flex justify-center py-20"><Spinner /></div>;
   return (
     <div className="max-w-4xl space-y-4">
-      <PageHeader back={{ href: '/approvals', label: 'Approvals' }} title={<span className="flex items-center gap-2">{r.requestNo} <Badge tone={r.status === 'PENDING' ? 'amber' : r.status === 'APPROVED' ? 'green' : 'red'}>{r.status.toLowerCase()}</Badge></span>}
+      <PageHeader back={{ href: '/approvals', label: 'Approvals' }} title={<span className="flex items-center gap-2">{r.requestNo} <Badge tone={r.status === 'PENDING' ? 'amber' : r.status === 'APPROVED' ? 'green' : 'red'}>{pendingStage(r) && r.action === 'TRANSFER' ? pendingStage(r) : r.status.toLowerCase()}</Badge></span>}
         subtitle={`${label(HISTORIC_ACTION_LABEL, r.action)} · ${r.policyName}`}
         actions={<>
           {r.canAct && <><button className="btn btn-primary" onClick={() => { setDecision('APPROVE'); setComment(''); }}>Approve</button><button className="btn btn-danger" onClick={() => { setDecision('REJECT'); setComment(''); }}>Reject</button></>}
@@ -48,7 +48,7 @@ export default function ApprovalDetail() {
       </FormModal>
       <FormModal open={reassign} onClose={() => setReassign(false)} title="Reassign current step" submitLabel="Reassign" disabled={!toUser}
         onSubmit={async () => { await api(`/api/approvals/${r.id}/reassign`, { body: { toUserId: toUser, comment: comment || undefined } }); toast('Reassigned'); reload(); }}>
-        <Field label="New approver" required><UserSelect value={toUser} onChange={setToUser} roles={['ADMIN', 'IT_OPERATOR']} /></Field>
+        <Field label="New approver" required><UserSelect value={toUser} onChange={setToUser} roles={r.action === 'TRANSFER' && r.currentOrder > 1 ? ['ADMIN', 'IT_OPERATOR', 'BRANCH_USER'] : ['ADMIN', 'IT_OPERATOR']} /></Field>
         <Field label="Comment"><textarea className="input" value={comment} onChange={(e) => setComment(e.target.value)} /></Field>
       </FormModal>
     </div>

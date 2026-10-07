@@ -8,16 +8,16 @@ type Problem = { ref: string; message: string };
 type Mode = 'ASSIGN' | 'TRANSFER';
 interface Result {
   mode: Mode; holder: string; selected: number; assignable: number; assigned: number; released: number;
-  skipped: Problem[]; failed: Problem[]; pendingApproval?: { requestNo: string };
+  skipped: Problem[]; failed: Problem[]; pendingApproval?: { requestNo: string }; approvals?: string[];
 }
 type Target = { type: 'EMPLOYEE'; id: string; label: string } | { type: 'LOCATION'; id: string; label: string } | null;
 
 /**
- * The asset register's one way to assign and to transfer (§2, §3, §6).
- *   one asset   → Assign to: an Employee, or a Location, which is a transfer;
- *   many assets → Transfer to: a Location, all of them in a single action.
- * The destination is asked once, then a check step says exactly what will happen — how many will
- * move, which are skipped and which cannot — before anything changes.
+ * The asset register's one way to assign and to transfer.
+ *   one asset   → Assign to: an Employee (an assignment), or a Location (a transfer);
+ *   many assets → Assign to a Location: a bulk transfer.
+ * A transfer is a request: nothing moves until an Administrator and then the destination's
+ * location manager approve it. A check step says what will happen before anything is sent.
  */
 export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
   open: boolean; onClose: () => void; count: number;
@@ -52,8 +52,8 @@ export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
   };
 
   const nothing = !!check && check.assignable === 0;
-  const title = many ? `Transfer ${count} assets` : 'Assign asset';
-  const confirm = check ? (check.mode === 'TRANSFER' ? `Confirm transfer of ${check.assignable}` : `Confirm assignment of ${check.assignable}`) : 'Continue';
+  const title = many ? `Assign ${count} assets` : 'Assign asset';
+  const confirm = check ? (check.mode === 'TRANSFER' ? `Request transfer of ${check.assignable}` : `Confirm assignment of ${check.assignable}`) : 'Continue';
   return (
     <Modal open={open} onClose={onClose} title={title}
       footer={<>
@@ -65,12 +65,7 @@ export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
       </>}>
       <form id="bulk-assign" onSubmit={run} className="space-y-3">
         {!check ? <>
-          {many ? (
-            <p className="text-sm text-slate-600">
-              All {count} selected assets move to the location you choose. Moving assets to another location is a <b>transfer</b>: each asset&apos;s current location,
-              status, assignment history and timestamps are updated in one action.
-            </p>
-          ) : (
+          {many ? null : (
             <Field label="Assign to" required>
               <div className="flex flex-col gap-1 text-sm">
                 <label className="flex items-center gap-2">
@@ -79,13 +74,13 @@ export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
                 </label>
                 <label className="flex items-center gap-2">
                   <input type="radio" checked={kind === 'LOCATION'} onChange={() => { setKind('LOCATION'); setTarget(null); }} />
-                  Location (transfer) <span className="text-slate-500">— the asset moves to that location</span>
+                  Location <span className="text-slate-500">— a transfer, after two approvals</span>
                 </label>
               </div>
             </Field>
           )}
           {transfer ? (
-            <Field label={many ? 'Transfer to' : 'Location'} required>
+            <Field label={many ? 'Assign to location (transfer)' : 'Location'} required>
               <select className="input" value={target?.type === 'LOCATION' ? target.id : ''} required
                 onChange={(e) => { const l = locations.find((x) => x.id === e.target.value); setTarget(l ? { type: 'LOCATION', id: l.id, label: l.namePath } : null); }}>
                 <option value="">Choose the destination location</option>
@@ -103,10 +98,17 @@ export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
         </> : <>
           <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
             <div>
-              <b>{check.assignable}</b> of {check.selected} asset{check.selected === 1 ? '' : 's'} will be {check.mode === 'TRANSFER' ? <>transferred to <b>{check.holder}</b></> : <>assigned to <b>{check.holder}</b></>}.
+              {check.mode === 'TRANSFER'
+                ? <>A transfer request for <b>{check.assignable}</b> of {check.selected} asset{check.selected === 1 ? '' : 's'} to <b>{check.holder}</b> will be sent for approval.</>
+                : <><b>{check.assignable}</b> of {check.selected} asset{check.selected === 1 ? '' : 's'} will be assigned to <b>{check.holder}</b>.</>}
             </div>
+            {check.mode === 'TRANSFER' && check.approvals && check.assignable > 0 && (
+              <ol className="mt-1 list-decimal pl-5 text-xs text-slate-600">
+                {check.approvals.map((a, i) => <li key={i}>{a}</li>)}
+              </ol>
+            )}
             {check.mode === 'TRANSFER' && check.released > 0 && (
-              <div className="mt-1 text-xs text-amber-700">{check.released} asset{check.released === 1 ? ' is' : 's are'} currently held by a person or a department; the holding ends when the asset moves, and it arrives In stock.</div>
+              <div className="mt-1 text-xs text-amber-700">{check.released} asset{check.released === 1 ? ' is' : 's are'} currently held by a person or a department; once approved, the holding ends and the asset arrives In stock.</div>
             )}
             {remarks && <div className="mt-1 text-xs text-slate-500">Remarks: {remarks}</div>}
           </div>
@@ -136,6 +138,7 @@ function ProblemList({ title, items, tone }: { title: string; items: Problem[]; 
 /** The toast afterwards: how many went through, and how many were left out. */
 export function bulkAssignMessage(r: Result) {
   const what = r.mode === 'TRANSFER' ? 'transferred to' : 'assigned to';
+  if (r.pendingApproval && r.mode === 'TRANSFER') return `Transfer ${r.pendingApproval.requestNo} of ${r.assignable} asset(s) to ${r.holder} is pending admin approval`;
   if (r.pendingApproval) return `Sent ${r.assignable} asset(s) for approval as ${r.pendingApproval.requestNo}`;
   const left = r.skipped.length + r.failed.length;
   return `${r.assigned} asset${r.assigned === 1 ? '' : 's'} ${what} ${r.holder}${left ? ` · ${left} left unchanged` : ''}`;

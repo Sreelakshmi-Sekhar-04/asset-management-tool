@@ -3,13 +3,13 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/components/api';
 import { useMe } from '@/components/me';
-import { LocationSelect, useLocations, type Loc } from '@/components/pickers';
+import { LocationSelect, UserSelect, useLocations, type Loc } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useConfirm, useToast } from '@/components/ui';
 
 // Every location sits under an organization (head quarter). Organizations themselves are created
 // under Configuration → Organizations, not here.
 const TYPES = ['REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER'];
-type Form = { name: string; type: string; parentId: string; state: string; code: string; email: string };
+type Form = { name: string; type: string; parentId: string; state: string; code: string; email: string; managerId: string };
 
 export default function LocationsPage() {
   const toast = useToast();
@@ -19,8 +19,8 @@ export default function LocationsPage() {
   const [edit, setEdit] = useState<{ id?: string; f: Form } | null>(null);
   const [filter, setFilter] = useState('');
   const open = (l?: Loc, parent?: Loc) => setEdit(l
-    ? { id: l.id, f: { name: l.name, type: l.type, parentId: l.parentId ?? '', state: l.state ?? '', code: l.code ?? '', email: l.email ?? '' } }
-    : { f: { name: '', type: 'BRANCH', parentId: parent?.id ?? me.organization?.id ?? '', state: '', code: '', email: '' } });
+    ? { id: l.id, f: { name: l.name, type: l.type, parentId: l.parentId ?? '', state: l.state ?? '', code: l.code ?? '', email: l.email ?? '', managerId: l.managerId ?? '' } }
+    : { f: { name: '', type: 'BRANCH', parentId: parent?.id ?? me.organization?.id ?? '', state: '', code: '', email: '', managerId: '' } });
   const toggle = async (l: Loc) => {
     if (l.active && !(await confirm(`Deactivate ${l.namePath}? Inactive locations can’t receive assets or transfers. History is kept.`))) return;
     try { await api(`/api/locations/${l.id}`, { method: 'PATCH', body: { active: !l.active } }); toast(l.active ? 'Deactivated' : 'Activated'); reload(); } catch (e) { toast((e as Error).message, 'err'); }
@@ -38,13 +38,14 @@ export default function LocationsPage() {
       <Card bodyClass="p-0">
         {!data ? <div className="flex justify-center py-10"><Spinner /></div> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Location</th><th>Type</th><th>State (GST)</th><th>Code</th><th>Assets here</th><th /></tr></thead>
+            <thead><tr><th>Location</th><th>Type</th><th>State (GST)</th><th>Code</th><th>Location manager</th><th>Assets here</th><th /></tr></thead>
             <tbody>{rows.map((l) => (
               <tr key={l.id} className={l.active ? '' : 'text-slate-400'}>
                 <td style={{ paddingLeft: `${0.75 + l.depth * 1.25}rem` }}>{l.name} {!l.active && <Badge>Inactive</Badge>}</td>
                 <td className="text-xs">{l.type.toLowerCase()}</td>
                 <td className="text-xs">{l.state ?? (l.effectiveState ? <span className="text-slate-400">{l.effectiveState} (inherited)</span> : '—')}</td>
                 <td className="text-xs">{l.code ?? ''}</td>
+                <td className="text-xs">{l.managerName ?? <span className="text-slate-400">{inheritedManager(l, data ?? []) ? `${inheritedManager(l, data ?? [])} (inherited)` : 'Not set'}</span>}</td>
                 <td>{l.assetCount ?? ''}</td>
                 <td className="whitespace-nowrap text-right">
                   {l.active && <button className="btn btn-sm btn-ghost" onClick={() => open(undefined, l)}>Add child</button>}
@@ -60,7 +61,7 @@ export default function LocationsPage() {
       </Card>
       <FormModal open={!!edit} onClose={() => setEdit(null)} title={edit?.id ? 'Edit location' : 'Add location'}
         onSubmit={async () => {
-          const body = { name: f!.name, type: f!.type, parentId: f!.parentId || null, state: f!.state || null, code: f!.code || null, email: f!.email || null };
+          const body = { name: f!.name, type: f!.type, parentId: f!.parentId || null, state: f!.state || null, code: f!.code || null, email: f!.email || null, managerId: f!.managerId || null };
           if (edit!.id) await api(`/api/locations/${edit!.id}`, { method: 'PATCH', body }); else await api('/api/locations', { body });
           toast('Saved'); reload();
         }}>
@@ -71,8 +72,22 @@ export default function LocationsPage() {
           <Field label="State" hint="Set on a state node or branch; used to flag inter-state transfers"><input className="input" value={f.state} onChange={(e) => set({ state: e.target.value })} /></Field>
           <Field label="Code"><input className="input" value={f.code} onChange={(e) => set({ code: e.target.value })} /></Field>
           <Field label="Branch email" hint="Receives transfer notifications"><input className="input" type="email" value={f.email} onChange={(e) => set({ email: e.target.value })} /></Field>
+          <Field label="Location manager" className="sm:col-span-2" hint="Gives the second approval for transfers into this location, after an Administrator. Left empty, the manager of the location above it approves.">
+            <UserSelect value={f.managerId} onChange={(managerId) => set({ managerId })} placeholder="Same as the location above" />
+          </Field>
         </div>}
       </FormModal>
     </div>
   );
+}
+
+/** The manager a location without its own inherits from the nearest location above it. */
+function inheritedManager(l: Loc, all: Loc[]): string | null {
+  const byId = new Map(all.map((x) => [x.id, x]));
+  let cur = l.parentId ? byId.get(l.parentId) : undefined;
+  while (cur) {
+    if (cur.managerName) return cur.managerName;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return null;
 }

@@ -24,7 +24,6 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
   const listUrl = assetsOnly ? `/api/imports${qs({ type: 'ASSETS', pageSize: 20 })}` : `/api/imports?${ls.apiQuery}`;
   const { data, error, loading, reload } = useApi<{ rows: Job[]; total: number }>(listUrl);
   const [type, setType] = useState('ASSETS');
-  const [mode, setMode] = useState('CREATE_ONLY');
   const [createMissing, setCreateMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
@@ -38,7 +37,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
     if (!f) { setErr(new Error('Choose a CSV or Excel file.')); return; }
     setBusy(true); setErr(null);
     const form = new FormData();
-    form.set('file', f); form.set('type', type); form.set('mode', mode); form.set('createMissing', String(createMissing));
+    form.set('file', f); form.set('type', type); form.set('createMissing', String(createMissing));
     try { const j = await api<{ id: string }>('/api/imports', { form }); toast('Uploaded. The dry run has started.'); router.push(`/imports/${j.id}`); }
     catch (x) { setErr(x); } finally { setBusy(false); }
   };
@@ -47,7 +46,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
     <div className="space-y-4">
       <Card title={assetsOnly ? 'Upload an Excel or CSV file' : 'New import'}>
         <form onSubmit={upload} className="space-y-3">
-          <div className={assetsOnly ? 'grid gap-3 md:grid-cols-3' : 'grid gap-3 md:grid-cols-4'}>
+          <div className={assetsOnly ? 'grid gap-3 md:grid-cols-2' : 'grid gap-3 md:grid-cols-3'}>
             {!assetsOnly && (
               <Field label="What to import">
                 <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
@@ -55,16 +54,11 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
                 </select>
               </Field>
             )}
-            <Field label="Mode">
-              <select className="input" value={mode} onChange={(e) => setMode(e.target.value)} disabled={type === 'BRANCH_USERS'}>
-                <option value="CREATE_ONLY">Create new only</option><option value="CREATE_OR_UPDATE">Create or update existing</option>
-              </select>
-            </Field>
             <Field label="File (.csv or .xlsx, up to 20,000 rows)"><input ref={file} type="file" accept=".csv,.xlsx" className="input" /></Field>
             <div className="flex items-end"><button className="btn btn-primary w-full" disabled={busy}>{busy && <Spinner className="h-3 w-3" />}Upload and dry run</button></div>
           </div>
           {type !== 'BRANCH_USERS' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />Create locations and departments that don’t exist yet (listed in the dry run before you confirm)</label>}
-          {assetsOnly && <p className="text-xs text-slate-500">Serial numbers in the file are checked the same way as scanned ones: a serial that repeats in the file, or is already in the register, is flagged on its row before anything is saved. In the preview you can correct any row, and scan or type missing serial numbers, before you confirm.</p>}
+          {assetsOnly && <p className="text-xs text-slate-500">Each row is matched against the register by serial number, then legacy tag: new assets are created, existing ones updated, and rows already in the register with the same details are shown as duplicates. In the preview you can correct any row, and scan or type missing serial numbers, before you confirm.</p>}
           <div className="flex flex-wrap gap-2 text-sm">
             Template: <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=xlsx`)}>Excel</button>
             <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=csv`)}>CSV</button>
@@ -83,7 +77,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
             { key: 'type', header: 'Type', render: (r) => IMPORT_TYPE[r.type] },
             { key: 'status', header: 'Status', render: (r) => <ImportStatus s={r.status} /> },
             { key: 'rows', header: 'Rows', render: (r) => RUNNING.includes(r.status) ? `${r.processedRows}/${r.totalRows || '…'}` : r.totalRows },
-            { key: 'counts', header: 'Result', render: (r) => <span className="text-xs">{r.counts?.total !== undefined ? `${r.counts.CREATED} new · ${r.counts.UPDATED} updated · ${r.counts.WARNING} warnings · ${r.counts.REJECTED} rejected` : ''}</span> },
+            { key: 'counts', header: 'Result', render: (r) => <span className="text-xs">{r.counts?.total !== undefined ? `${r.counts.CREATED} new · ${r.counts.UPDATED} updated · ${r.counts.UNCHANGED ?? 0} duplicate · ${r.counts.WARNING} to review · ${r.counts.REJECTED} invalid` : ''}</span> },
             { key: 'createdByName', header: 'By' },
           ]} />
       </>}

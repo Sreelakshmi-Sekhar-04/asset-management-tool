@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, clearCachedApi, qs, useApi, useCachedApi } from './api';
 import clsx from 'clsx';
 
-export interface Loc { id: string; name: string; namePath: string; type: string; depth: number; active: boolean; assetCount: number; effectiveState: string | null; parentId: string | null; code: string | null; state: string | null; email: string | null }
+export interface Loc { id: string; name: string; namePath: string; type: string; depth: number; active: boolean; assetCount: number; effectiveState: string | null; parentId: string | null; code: string | null; state: string | null; email: string | null; managerId?: string | null; managerName?: string | null }
 export interface Cat { id: string; name: string; code: string | null; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean; active: boolean; assetCount: number }
 export interface Dept { id: string; name: string; active: boolean }
 

@@ -14,7 +14,15 @@ export const locationInput = z.object({
   state: z.string().trim().max(80).nullable().optional(),
   code: z.string().trim().max(40).nullable().optional(),
   email: z.string().trim().email().nullable().optional().or(z.literal('').transform(() => null)),
+  /** Approves transfers into this location (and into locations beneath it that have no manager of their own). */
+  managerId: z.string().nullable().optional().or(z.literal('').transform(() => null)),
 });
+
+async function assertManager(t: Db, managerId: string | null | undefined) {
+  if (!managerId) return;
+  const u = await t.user.findUnique({ where: { id: managerId }, select: { active: true } });
+  if (!u?.active) throw badRequest('The location manager must be an active user.', [{ field: 'managerId', message: 'Choose an active user' }]);
+}
 
 export async function listLocations(actor: Actor, opts: { includeInactive?: boolean; all?: boolean } = {}) {
   // `all` widens past a branch user's own subtree (destination pickers), never past the
@@ -23,11 +31,12 @@ export async function listLocations(actor: Actor, opts: { includeInactive?: bool
   const rows = await prisma.location.findMany({
     where: { ...(opts.all ? orgOnly : locationScope(actor)), ...(opts.includeInactive ? {} : { active: true }) },
     orderBy: { namePath: 'asc' },
+    include: { manager: { select: { name: true } } },
   });
   const counts = await prisma.asset.groupBy({ by: ['locationId'], where: { status: { not: 'RETIRED' } }, _count: true });
   const cmap = new Map(counts.map((c) => [c.locationId, c._count]));
   // Destination pickers list every location by name, but asset counts are only disclosed within scope.
-  return rows.map((r) => ({ ...r, assetCount: inScopePath(actor, r.idPath) ? cmap.get(r.id) ?? 0 : null, effectiveState: effectiveStateFromRows(r, rows) }));
+  return rows.map(({ manager, ...r }) => ({ ...r, managerName: manager?.name ?? null, assetCount: inScopePath(actor, r.idPath) ? cmap.get(r.id) ?? 0 : null, effectiveState: effectiveStateFromRows(r, rows) }));
 }
 
 function effectiveStateFromRows(r: { state: string | null; parentId: string | null }, rows: { id: string; state: string | null; parentId: string | null }[]): string | null {
@@ -59,10 +68,11 @@ export async function createLocation(actor: Actor, input: z.infer<typeof locatio
     if (data.parentId && !parent) throw badRequest('Parent location not found.');
     const dup = await t.location.findFirst({ where: { parentId: data.parentId ?? null, name: { equals: data.name, mode: 'insensitive' } } });
     if (dup) throw conflict(`A location named "${data.name}" already exists under ${parent?.namePath ?? 'the root'}.`);
+    await assertManager(t, data.managerId);
     const id = randomUUID();
     const loc = await t.location.create({
       data: {
-        id, name: data.name, type: data.type, state: data.state || null, code: data.code || null, email: data.email || null,
+        id, name: data.name, type: data.type, state: data.state || null, code: data.code || null, email: data.email || null, managerId: data.managerId || null,
         parentId: parent?.id ?? null,
         idPath: `${parent?.idPath ?? '/'}${id}/`,
         namePath: parent ? `${parent.namePath} / ${data.name}` : data.name,
@@ -88,6 +98,7 @@ export async function updateLocation(actor: Actor, id: string, input: unknown) {
       if (users > 0) throw conflict(`Cannot deactivate ${loc.namePath}: ${users} active user account(s) are bound to it.`);
     }
 
+    await assertManager(t, data.managerId);
     let parent = loc.parentId ? await t.location.findUnique({ where: { id: loc.parentId } }) : null;
     const parentChanged = data.parentId !== undefined && (data.parentId ?? null) !== loc.parentId;
     if (parentChanged) {
@@ -109,6 +120,7 @@ export async function updateLocation(actor: Actor, id: string, input: unknown) {
       data: {
         name, type: data.type, state: data.state === undefined ? undefined : data.state || null,
         code: data.code === undefined ? undefined : data.code || null, email: data.email === undefined ? undefined : data.email || null,
+        managerId: data.managerId === undefined ? undefined : data.managerId || null,
         active: data.active, parentId: parentChanged ? parent?.id ?? null : undefined,
         idPath: newIdPath, namePath: newNamePath, depth: newDepth,
       },

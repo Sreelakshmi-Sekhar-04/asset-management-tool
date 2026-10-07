@@ -11,7 +11,8 @@ export interface AssetFormValues {
 }
 export const emptyAsset: AssetFormValues = { categoryId: '', make: '', model: '', serialNumber: '', hostname: '', ipAddress: '', macAddress: '', legacyTag: '', purchaseDate: '', purchaseCost: '', vendor: '', warrantyEnd: '', condition: '', remarks: '', sdpTicketId: '', sdpTicketUrl: '', locationId: '' };
 
-interface Match { key: string; value: string; severity: string; match: { id: string; assetCode: string; status: string; make: string; model: string; location: string | null } }
+interface Match { key: string; value: string; severity: string; match: { id: string; assetCode: string; status: string; make: string; model: string; serialNumber?: string | null; legacyTag?: string | null; location: string | null } }
+const FIELD: Record<string, string> = { serial: 'Serial number', legacyTag: 'Legacy tag', hostname: 'Hostname', ip: 'IP address' };
 
 /** Duplicate handling (FR-REG-05): BLOCK shows the matching record; WARN asks for a reason, which is recorded. */
 export function DuplicateNotice({ error, reason, setReason }: { error: unknown; reason: string; setReason: (v: string) => void }) {
@@ -21,8 +22,13 @@ export function DuplicateNotice({ error, reason, setReason }: { error: unknown; 
   return (
     <div className={warn ? 'rounded-md border border-amber-300 bg-amber-50 p-3 text-sm' : 'rounded-md border border-red-300 bg-red-50 p-3 text-sm'}>
       <div className="font-medium">{error.message}</div>
-      <ul className="mt-1 list-disc pl-5 text-xs">
-        {matches.map((m, i) => <li key={i}><Link href={`/assets/${m.match.id}`} target="_blank">{m.match.assetCode}</Link> · {m.match.make} {m.match.model} · {m.match.status.replace('_', ' ').toLowerCase()} · {m.match.location ?? '—'}</li>)}
+      <ul className="mt-1 space-y-1 text-xs">
+        {matches.map((m, i) => (
+          <li key={i}>
+            <b>Duplicate field:</b> {FIELD[m.key] ?? m.key} · <b>Your value:</b> <span className="font-mono">{m.value}</span> · <b>Existing asset:</b>{' '}
+            <Link href={`/assets/${m.match.id}`} target="_blank">{m.match.assetCode}</Link> ({m.match.make} {m.match.model}{m.match.serialNumber ? `, serial ${m.match.serialNumber}` : ''}{m.match.legacyTag ? `, legacy tag ${m.match.legacyTag}` : ''}) · {m.match.status.replace('_', ' ').toLowerCase()} · {m.match.location ?? '—'}
+          </li>
+        ))}
       </ul>
       {warn && <Field label="Reason for saving anyway" required className="mt-2"><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} required /></Field>}
     </div>

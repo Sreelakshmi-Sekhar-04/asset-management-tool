@@ -117,3 +117,21 @@ describe('partial updates keep fields the caller did not send', () => {
     invalidateSettings();
   });
 });
+
+describe('a duplicate suspect says what is duplicated', () => {
+  it('the listing and the asset page name the duplicated field, the value and the existing asset', async () => {
+    const { getAssetDetail } = await import('@/server/services/assets');
+    const first = await w.asset(w.A.id, { hostname: `HOST-DUP-${w.s}`, legacyTag: `LT-FIRST-${w.s}` });
+    await rejectsWith(w.asset(w.A.id, { hostname: `HOST-DUP-${w.s}` }), 409, /Give a reason/);
+    const second = await w.asset(w.A.id, { hostname: `HOST-DUP-${w.s}`, duplicateReason: 'Re-imaged machine' });
+    const { rows } = await listAssets(w.it.actor, { ids: [second.id] }, { skip: 0, take: 5 });
+    expect(rows[0].flags).toContain('Duplicate-suspect');
+    expect(rows[0].duplicates).toEqual([expect.objectContaining({
+      field: 'hostname', fieldLabel: 'Hostname', value: `HOST-DUP-${w.s}`, reason: 'Re-imaged machine',
+      other: expect.objectContaining({ id: first.id, assetCode: first.assetCode, name: 'Dell Latitude 5440', serialNumber: first.serialNumber, legacyTag: `LT-FIRST-${w.s}` }),
+    })]);
+    // The other side of the pair points back at the new asset.
+    const detail = await getAssetDetail(w.it.actor, first.id);
+    expect(detail.duplicates[0]).toMatchObject({ field: 'hostname', value: `HOST-DUP-${w.s}`, other: { id: second.id, assetCode: second.assetCode } });
+  });
+});

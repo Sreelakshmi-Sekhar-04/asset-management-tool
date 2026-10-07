@@ -89,6 +89,8 @@ async function main() {
   let bn = 0;
   // The root of the tree is the organization / head quarter; regions sit beneath it.
   const org = await createLocation(adminA, { name: 'Joy Alukkas', type: 'ORGANIZATION', parentId: null, code: 'JA-HQ' });
+  // The administrator gives the second transfer approval for every branch (inherited from the organization).
+  await prisma.location.update({ where: { id: org.id }, data: { managerId: admin.id } });
   for (const [region, states] of Object.entries(REGIONS)) {
     const r = await createLocation(adminA, { name: region, type: 'REGION', parentId: org.id });
     regionIds[region] = r.id;
@@ -198,8 +200,11 @@ async function main() {
     (await prisma.asset.findMany({ where: { locationId: branchId, status: { in: ['IN_STOCK', 'ASSIGNED'] }, id: { notIn: exclude }, purchaseCost: { lt: 100000 } }, take: n, orderBy: { assetCode: 'asc' } })).map((a) => a.id);
   const used: string[] = [];
   const take = async (b: string, n: number) => { const ids = await stockAt(b, n, used); used.push(...ids); return ids; };
-  const moveTo = async (fromName: string, toName: string, n: number, remarks: string) =>
-    bulkAssign(it, { assetIds: await take(byName(fromName).id, n), holder: { type: 'LOCATION', id: byName(toName).id }, remarks });
+  // Each transfer is approved by an administrator and then the destination's manager.
+  const moveTo = async (fromName: string, toName: string, n: number, remarks: string) => {
+    const r = await bulkAssign(it, { assetIds: await take(byName(fromName).id, n), holder: { type: 'LOCATION', id: byName(toName).id }, remarks }) as { pendingApproval?: { id: string } };
+    if (r.pendingApproval) for (let step = 0; step < 2; step++) await decide(adminA, r.pendingApproval.id, 'APPROVE', 'Seed');
+  };
   await moveTo('Thiruvananthapuram', 'Kollam', 3, 'Branch expansion at Kollam');
   await moveTo('Alappuzha', 'Kottayam', 3, 'Replacement stock for Kottayam');
   await moveTo('Kozhikode', 'Malappuram', 4, 'Temporary deployment for audit season');

@@ -12,6 +12,7 @@ import { AssetQrCard, PrintLabelsDialog } from '@/components/labels';
 import { useMe } from '@/components/me';
 import { HolderPicker, LocationSelect, type HolderValue } from '@/components/pickers';
 import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
+import { DuplicateDetails, TransferStatusCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
 import { Badge, Card, ErrorBox, Field, FormModal, Modal, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
 
 interface Detail {
@@ -21,7 +22,8 @@ interface Detail {
   raw: { purchaseDate: string | null; condition: string | null; remarks: string | null; sdpTicketId: string | null; sdpTicketUrl: string | null; origin: string; fieldSources: Record<string, string>; holderEmployeeId: string | null; holderDepartmentId: string | null; holderLocationId: string | null; categorySerialRequired: boolean; createdBy: string; updatedBy: string | null; retiredBy: string | null };
   renewables: { id: string; type: string; label: string; expiryDate: string; status: string; source: string | null; vendor: string | null }[];
   assignments: { id: string; holderType: string; holderName: string; startAt: string; endAt: string | null; source: string }[];
-  duplicates: { key: string; value: string; reason: string; other: { id: string; assetCode: string } }[];
+  duplicates: DuplicateInfo[];
+  transferStatus: string; transfer: TransferInfo | null;
   deviceData: { id: string; sourceKey: string; externalId: string | null; os: string | null; osVersion: string | null; lastSeen: string | null; currentUser: string | null; patchStatus: string | null; lastPatched: string | null; applications: unknown[]; updatedAt: string }[];
   exceptions: { id: string; reason: string; transferId: string; createdAt: string }[];
   pendingApprovals: { id: string; requestNo: string; action: string; summary: string }[];
@@ -56,7 +58,7 @@ export default function AssetDetail() {
         subtitle={`${a.category} · ${a.make} ${a.model}${a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}`}
         actions={<>
           {!retired && <button className="btn" onClick={() => setDlg('edit')}>Edit</button>}
-          {me.isIT && !retired && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('assign')}>Assign / transfer</button>}
+          {me.isIT && !retired && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('assign')}>Assign</button>}
           {me.isIT && !locked && a.status === 'ASSIGNED' && <button className="btn" onClick={() => setDlg('checkin')}>Check in</button>}
           {me.isIT && !locked && (a.status === 'IN_STOCK' || a.status === 'ASSIGNED') && <button className="btn" onClick={() => setDlg('repair')}>Send to repair</button>}
           {me.isIT && !locked && a.status === 'UNDER_REPAIR' && <button className="btn" onClick={() => setDlg('repairdone')}>Repair done</button>}
@@ -81,6 +83,7 @@ export default function AssetDetail() {
               <dt>Location</dt><dd>{a.location ?? '—'}</dd>
               <dt>Holder</dt><dd>{a.holder ? `${a.holder} (${label(HOLDER_TYPE_LABEL, a.holderType)})` : 'None'}</dd>
               <dt>Status</dt><dd>{label(STATUS_LABEL, a.status)}</dd>
+              <dt>Transfer status</dt><dd><TransferStatusCell status={a.transferStatus} transfer={a.transfer} /></dd>
               {retired && <><dt>Retired</dt><dd>{fmtDateOnly(a.retiredAt)} by {a.raw.retiredBy ?? '—'} · {a.disposalType?.toLowerCase()} · {a.retireReason}</dd></>}
             </dl>
           </Card>
@@ -119,8 +122,8 @@ export default function AssetDetail() {
             </dl>
           </Card>
           {a.duplicates.length > 0 && (
-            <Card title="Duplicate-suspect links" className="lg:col-span-2">
-              <ul className="text-sm">{a.duplicates.map((d, i) => <li key={i}>Same {d.key} <b>{d.value}</b> as <Link href={`/assets/${d.other.id}`}>{d.other.assetCode}</Link> — reason recorded: “{d.reason}”</li>)}</ul>
+            <Card title="Why this is a duplicate suspect" className="lg:col-span-2" bodyClass="p-0">
+              <DuplicateDetails items={a.duplicates} />
             </Card>
           )}
           <Card title="Assignment history" className="lg:col-span-2">

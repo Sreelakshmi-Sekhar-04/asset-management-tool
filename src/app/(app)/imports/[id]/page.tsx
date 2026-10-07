@@ -35,7 +35,7 @@ function Inner() {
   const verb = committed ? '' : ' (planned)';
 
   const confirmImport = async () => {
-    if (!(await confirm(`Confirm this import? ${c.CREATED} record(s) will be created and ${c.UPDATED} updated${c.WARNING ? `, plus ${c.WARNING} with duplicate warnings` : ''}, using the values shown in the table, including your corrections. Rejected and duplicate rows are skipped. The data is re-checked first; if anything changed since the last check, nothing is applied.`))) return;
+    if (!(await confirm(`Confirm this import? ${c.CREATED} record(s) will be created and ${c.UPDATED} updated${c.WARNING ? `, plus ${c.WARNING} possible duplicate(s) you reviewed` : ''}, using the values shown in the table, including your corrections. Invalid and duplicate rows are skipped. The data is re-checked first; if anything changed since the last check, nothing is applied.`))) return;
     setBusy(true); setErr(null);
     try { await api(`/api/imports/${id}/confirm`, { body: { warningReason: reason || undefined } }); toast('Commit started'); reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
   };
@@ -44,7 +44,7 @@ function Inner() {
     <div className="space-y-4">
       {node}
       <PageHeader back={job.type === 'ASSETS' ? { href: '/assets/new?tab=excel', label: 'Create asset' } : { href: '/imports', label: 'Imports' }} title={job.fileName}
-        subtitle={<span className="flex flex-wrap items-center gap-2">{IMPORT_TYPE[job.type]} · {job.mode === 'CREATE_ONLY' ? 'create new only' : 'create or update'} · by {job.createdByName} {fmtDateTime(job.createdAt)} <ImportStatus s={job.status} /></span>}
+        subtitle={<span className="flex flex-wrap items-center gap-2">{IMPORT_TYPE[job.type]} · by {job.createdByName} {fmtDateTime(job.createdAt)} <ImportStatus s={job.status} /></span>}
         actions={<>
           {!running && job.totalRows > 0 && !job.reportPurgedAt && <button className="btn" onClick={() => download(`/api/imports/${id}/report`).catch((e) => toast(e.message, 'err'))}>Download row report</button>}
           {['QUEUED', 'VALIDATED', 'FAILED'].includes(job.status) && <button className="btn btn-ghost" onClick={async () => { if (await confirm('Cancel this import? Nothing has been saved.')) { await api(`/api/imports/${id}/cancel`, { method: 'POST' }).catch((e) => toast(e.message, 'err')); reload(); } }}>Cancel import</button>}
@@ -59,8 +59,8 @@ function Inner() {
 
       {c.total !== undefined && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          <Stat label={`Created${verb}`} value={c.CREATED} tone="green" /><Stat label={`Updated${verb}`} value={c.UPDATED} /><Stat label="Duplicate" value={c.UNCHANGED} />
-          <Stat label="Duplicate warnings" value={c.WARNING} tone={c.WARNING ? 'amber' : undefined} /><Stat label="Rejected" value={c.REJECTED} tone={c.REJECTED ? 'red' : undefined} />
+          <Stat label={`New: created${verb}`} value={c.CREATED} tone="green" /><Stat label={`Existing: updated${verb}`} value={c.UPDATED} /><Stat label="Duplicate" value={c.UNCHANGED} />
+          <Stat label="Possible duplicates to review" value={c.WARNING} tone={c.WARNING ? 'amber' : undefined} /><Stat label="Invalid" value={c.REJECTED} tone={c.REJECTED ? 'red' : undefined} />
         </div>
       )}
 
@@ -76,7 +76,7 @@ function Inner() {
               </div>
             )}
             {c.WARNING > 0 && <Field label={`Reason for accepting ${c.WARNING} duplicate warning(s)`} required><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded on each affected asset" /></Field>}
-            {committable === 0 ? <p className="text-slate-600">Nothing to import yet: every row is a duplicate or rejected.{editor ? ' Fix the rejected rows in the table below.' : ' Fix the rejected rows using the row report and upload again.'}</p>
+            {committable === 0 ? <p className="text-slate-600">Nothing to import yet: every row is a duplicate or invalid.{editor ? ' Fix the invalid rows in the table below.' : ' Fix the invalid rows using the row report and upload again.'}</p>
               : <button className="btn btn-primary" disabled={busy || !!editor?.editing || !!editor?.saving || (c.WARNING > 0 && !reason.trim())} onClick={confirmImport}>{busy && <Spinner className="h-3 w-3" />}Confirm and import {committable.toLocaleString('en-IN')} row(s)</button>}
             {editor?.editing != null && <p className="text-xs text-amber-800">Save or cancel your changes to row {editor.editing} first.</p>}
             <ErrorBox error={err} />

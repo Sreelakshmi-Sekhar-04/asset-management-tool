@@ -10,12 +10,23 @@ import { Badge, clsx } from './ui';
 
 export interface ImportAssetRow {
   id: string; rowNumber: number; data: Record<string, string>; outcome: string; messages: string[]; resultCode: string | null;
-  view?: { holderName: string | null; asset: { id: string; assetCode: string; status: string } | null };
+  view?: { holderName: string | null; asset: { id: string; assetCode: string; status: string } | null; duplicate?: ImportDuplicate | null };
+}
+
+/** Why a row matches an asset already in the register: the field, the uploaded value, and that asset. */
+export interface ImportDuplicate {
+  field: string; fieldLabel: string; value: string;
+  asset: { id: string; assetCode: string; name: string; category: string; serialNumber: string | null; legacyTag: string | null; status: string };
 }
 
 export const OUT_TONE: Record<string, string> = { CREATED: 'green', UPDATED: 'blue', UNCHANGED: 'gray', WARNING: 'amber', REJECTED: 'red' };
-/** UNCHANGED is stored as such, but to the user a row that is already in the register is a duplicate. */
-export const OUT_LABEL: Record<string, string> = { CREATED: 'Create', UPDATED: 'Update', UNCHANGED: 'Duplicate', WARNING: 'Warning', REJECTED: 'Rejected' };
+/**
+ * What each row is, found by matching it against the register (no mode to choose). UNCHANGED is
+ * stored as such, but to the user a row already in the register with the same details is a duplicate.
+ */
+export const OUT_LABEL: Record<string, string> = { CREATED: 'New', UPDATED: 'Existing', UNCHANGED: 'Duplicate', WARNING: 'Possible duplicate', REJECTED: 'Invalid' };
+/** What confirming will do with the row. */
+export const OUT_ACTION: Record<string, string> = { CREATED: 'Create', UPDATED: 'Update', UNCHANGED: 'Skip', WARNING: 'Review', REJECTED: 'Fix' };
 
 /** Fields shown only in the "More fields" dialog while a row is edited. */
 export const MORE_FIELDS: { key: string; label: string; type?: string }[] = [
@@ -145,10 +156,14 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
     { key: 'row', header: 'Row', className: 'align-top', render: (r) => {
       // New rows need no note: their location and holder already show in the columns.
       // Problems that belong to a visible cell are shown on that cell instead.
-      const notes = r.outcome === 'CREATED' ? [] : r.messages.filter((m) => !(isProblem(r) && CELL_FIELDS.has(fieldOf(m) ?? '')));
+      // A duplicate is explained by the field that matched and the existing asset, not the raw message.
+      const dup = r.outcome === 'UNCHANGED' ? r.view?.duplicate : null;
+      const notes = r.outcome === 'CREATED' || dup ? [] : r.messages.filter((m) => !(isProblem(r) && CELL_FIELDS.has(fieldOf(m) ?? '')));
       return (
         <span className="flex flex-col items-start gap-1">
           <span className="flex items-center gap-2"><span className="text-slate-500">{r.rowNumber}</span><Badge tone={OUT_TONE[r.outcome]}>{OUT_LABEL[r.outcome]}</Badge></span>
+          <span className="text-[11px] text-slate-500">Action: <b className="font-medium text-slate-700">{OUT_ACTION[r.outcome]}</b></span>
+          {dup && <DuplicateNote d={dup} />}
           {notes.length > 0 && <span className={`block w-52 text-xs ${r.outcome === 'REJECTED' ? 'text-red-800' : r.outcome === 'WARNING' ? 'text-amber-800' : 'text-slate-600'}`}>{notes.join(' ')}</span>}
         </span>
       );
@@ -218,4 +233,17 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
     </span>
   ) : <button type="button" className="btn btn-sm" disabled={ed.editing !== null} onClick={() => ed.start(r)}>Edit</button> });
   return cols;
+}
+
+/** "Duplicate field: Serial number · Uploaded value · Existing asset AST-… (Dell Latitude, serial …)". */
+function DuplicateNote({ d }: { d: ImportDuplicate }) {
+  return (
+    <span className="block w-56 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] leading-snug text-slate-700">
+      <span className="block"><b>Duplicate field:</b> {d.fieldLabel}</span>
+      {d.field !== 'details' && <span className="block"><b>Uploaded value:</b> <span className="font-mono">{d.value}</span></span>}
+      <span className="block"><b>Existing asset:</b> <Link href={`/assets/${d.asset.id}`} className="font-medium">{d.asset.assetCode}</Link> · {d.asset.name}</span>
+      {d.asset.serialNumber && <span className="block"><b>Existing serial:</b> <span className="font-mono">{d.asset.serialNumber}</span></span>}
+      {d.asset.legacyTag && <span className="block"><b>Existing legacy tag:</b> {d.asset.legacyTag}</span>}
+    </span>
+  );
 }

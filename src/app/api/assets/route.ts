@@ -9,6 +9,7 @@ function filters(url: URL): AssetFilters {
     categoryIds: qList(url, 'categoryId'), statuses: qList(url, 'status'), locationId: q(url, 'locationId'), regionId: q(url, 'regionId'),
     holderType: q(url, 'holderType'), holderId: q(url, 'holderId'), warrantyWithinDays: n('warrantyWithinDays'), warrantyExpired: b('warrantyExpired'),
     flag: q(url, 'flag'), hasOpenTransfer: b('hasOpenTransfer'),
+    legacyTag: q(url, 'legacyTag'), ip: q(url, 'ip'), transferStatuses: qList(url, 'transferStatus'),
   };
 }
 

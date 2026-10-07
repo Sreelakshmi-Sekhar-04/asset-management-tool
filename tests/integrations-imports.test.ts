@@ -149,6 +149,28 @@ describe('imports', () => {
     expect((await importReportCsv(w.it.actor, job.id)).data.toString()).toMatch(/,Duplicate,/);
   });
 
+  it('with no mode chosen, each row is found to be new, existing (update) or a duplicate, and a duplicate says what matched', async () => {
+    const existing = await w.asset(w.A.id, { serialNumber: `AUTO-EX-${w.s}`, model: 'Latitude' });
+    const same = await w.asset(w.A.id, { serialNumber: `AUTO-DUP-${w.s}`, make: 'Dell', model: 'Latitude', legacyTag: `LT-AUTO-${w.s}` });
+    const job = await startImport(w.it.actor, { type: 'ASSETS', createMissing: false, fileName: 'auto.csv', data: Buffer.from([
+      'Category,Make,Model,Serial Number,Legacy Tag,Location',
+      `${w.cat.name},Dell,Latitude,AUTO-NEW-${w.s},,${loc()}`,
+      `${w.cat.name},Dell,Latitude 7440,AUTO-EX-${w.s},,${loc()}`,
+      `${w.cat.name},Dell,Latitude,AUTO-DUP-${w.s},LT-AUTO-${w.s},${loc()}`,
+    ].join('\n')) });
+    expect(job.mode).toBe('CREATE_OR_UPDATE');
+    await runValidation(job.id);
+    const { rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 });
+    expect(rows.map((r) => r.outcome)).toEqual(['CREATED', 'UPDATED', 'UNCHANGED']);
+    expect(rows[1].matchedId).toBe(existing.id);
+    const dup = (rows[2] as { view?: { duplicate?: unknown } }).view?.duplicate;
+    expect(dup).toMatchObject({ field: 'serial', fieldLabel: 'Serial number', value: `AUTO-DUP-${w.s}`, asset: { id: same.id, assetCode: same.assetCode, name: 'Dell Latitude', serialNumber: `AUTO-DUP-${w.s}`, legacyTag: `LT-AUTO-${w.s}` } });
+    await confirmImport(w.it.actor, job.id);
+    await runCommit(job.id);
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: existing.id } })).model).toBe('Latitude 7440');
+    expect(await prisma.asset.count({ where: { serialNormalized: `auto-new-${w.s}`.toLowerCase() } })).toBe(1);
+  });
+
   it('row reports are purged after the retention period, but the import log entry stays', async () => {
     const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'old.csv', data: csv([`${w.cat.name},HP,EliteBook,OLD-${w.s},${loc()}`]) });
     await runValidation(job.id);
