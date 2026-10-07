@@ -17,11 +17,11 @@ export default function DiscrepanciesPage() {
   const { data: camps } = useApi<Camp[]>('/api/verification/campaigns');
   const { data, error, loading } = useApi<{ rows: Row[]; total: number; unlisted: Unl[] }>(`/api/verification/discrepancies${qs({ campaignId: ls.get('campaignId'), review: ls.get('review') === 'ALL' ? undefined : ls.get('review'), page: ls.page, pageSize: ls.pageSize })}`);
   const f = useColumnFilters(ls);
-  const campaignFilter = f.option('campaignId', 'Campaign', (camps ?? []).map((c) => ({ value: c.id, label: c.name })), 'All campaigns');
+  const campaignFilter = f.option('campaignId', 'Audit', (camps ?? []).map((c) => ({ value: c.id, label: c.name })), 'All audits');
   const reviewFilter = f.choice('review', 'Review', [{ value: 'PENDING', label: 'Awaiting review' }, { value: 'ACCEPTED', label: 'Accepted' }, { value: 'REJECTED', label: 'Rejected' }, { value: 'ALL', label: 'Any review state' }], 'PENDING');
   return (
     <div className="space-y-4">
-      <PageHeader back={{ href: '/campaigns', label: 'Campaigns' }} title="Campaign discrepancies" subtitle="Missing and wrong-details findings, and unlisted assets, across your branches" />
+      <PageHeader back={{ href: '/campaigns', label: 'Physical Audit' }} title="Audit discrepancies" subtitle="Missing and wrong-details findings, and unlisted assets, across your branches" />
       <ErrorBox error={error} />
       <DataTable loading={loading} rows={data?.rows ?? []} total={data?.total ?? 0} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
         empty="No discrepancies match."
@@ -38,7 +38,7 @@ export default function DiscrepanciesPage() {
       <Card title={`Unlisted assets (${data?.unlisted.length ?? 0})`}>
         {!data?.unlisted.length ? <div className="p-4 text-sm text-slate-500">None match.</div> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Branch</th><th>Campaign</th><th>Make / model</th><th>Serial</th><th>Review</th></tr></thead>
+            <thead><tr><th>Branch</th><th>Audit</th><th>Make / model</th><th>Serial</th><th>Review</th></tr></thead>
             <tbody>{data.unlisted.map((u) => (
               <tr key={u.id}><td><Link href={`/campaigns/tasks/${u.task.id}?tab=unlisted`}>{u.task.location.namePath}</Link></td><td>{u.task.campaign.name}</td><td>{u.make} {u.model}</td><td>{u.serialNumber ?? '—'}</td>
                 <td>{reviewBadge(u.reviewStatus)}{u.createdAssetId && <> · <Link href={`/assets/${u.createdAssetId}`}>asset</Link></>}</td></tr>

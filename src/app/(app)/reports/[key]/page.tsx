@@ -51,7 +51,7 @@ function Inner() {
       case 'expired': return <label key={f} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={v === 'true'} onChange={(e) => set(e.target.checked ? 'true' : '')} />Expired only</label>;
       case 'dateFrom': return <label key={f} className="flex items-center gap-1 text-sm">From <input type="date" className="input w-auto" value={v} onChange={(e) => set(e.target.value)} /></label>;
       case 'dateTo': return <label key={f} className="flex items-center gap-1 text-sm">To <input type="date" className="input w-auto" value={v} onChange={(e) => set(e.target.value)} /></label>;
-      case 'campaignId': return <FilterSelect key={f} label="Campaign" value={v} onChange={set} options={(camps ?? []).map((c) => ({ value: c.id, label: c.name }))} />;
+      case 'campaignId': return <FilterSelect key={f} label="Physical audit" value={v} onChange={set} options={(camps ?? []).map((c) => ({ value: c.id, label: c.name }))} />;
       case 'review': return <FilterSelect key={f} label="Review" value={v} onChange={set} options={[{ value: 'PENDING', label: 'Pending' }, { value: 'ACCEPTED', label: 'Accepted' }, { value: 'REJECTED', label: 'Rejected' }]} />;
       default: return null;
     }

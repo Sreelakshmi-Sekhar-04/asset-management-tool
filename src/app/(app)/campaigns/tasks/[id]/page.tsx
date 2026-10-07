@@ -102,12 +102,12 @@ export default function TaskPage() {
     <div className="space-y-4">
       {node}
       <PageHeader
-        back={{ href: isIT ? `/campaigns/${t.campaign.id}` : '/campaigns', label: isIT ? t.campaign.name : 'Campaigns' }}
+        back={{ href: isIT ? `/campaigns/${t.campaign.id}` : '/campaigns', label: isIT ? t.campaign.name : 'Physical Audit' }}
         title={t.location.namePath}
         subtitle={<span className="flex flex-wrap items-center gap-2">{t.campaign.name} · due {fmtDateOnly(t.campaign.dueDate)} <TaskStatus s={t.status} />{t.overdue && <Badge tone="red">Overdue</Badge>}</span>}
         actions={<>
           {t.canEdit && s.unmarked > 0 && <button className="btn" onClick={async () => { if (await confirm(`Mark all ${s.unmarked} unmarked asset(s) as Present? Only do this after physically seeing each one.`)) act('mark-all', 'Unmarked assets marked present'); }}>Mark all unmarked present</button>}
-          {t.canEdit && <button className="btn btn-primary" onClick={async () => { if (await confirm('Submit this campaign task? The checklist locks and IT reviews the discrepancies.')) act('submit', 'Submitted to IT'); }}>Submit</button>}
+          {t.canEdit && <button className="btn btn-primary" onClick={async () => { if (await confirm('Submit this audit task? The checklist locks and IT reviews the discrepancies.')) act('submit', 'Submitted to IT'); }}>Submit</button>}
           {reviewing && <button className="btn" onClick={() => setReopenOpen(true)}>Reopen</button>}
           {reviewing && <button className="btn btn-primary" disabled={s.pendingReview > 0} title={s.pendingReview ? 'Review every discrepancy first' : undefined} onClick={() => setSignOpen(true)}>Sign off</button>}
           {t.status === 'SIGNED_OFF' && <><button className="btn" onClick={() => download(`/api/verification/tasks/${id}/verified-stock?format=xlsx`).catch((e) => toast(e.message, 'err'))}>Verified stock (Excel)</button><button className="btn" onClick={() => download(`/api/verification/tasks/${id}/verified-stock?format=csv`).catch((e) => toast(e.message, 'err'))}>CSV</button></>}
@@ -165,7 +165,7 @@ export default function TaskPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {tab === 'transit' && <p className="text-xs text-slate-500">These assets were in an open transfer when the checklist was generated, so they are excluded from this campaign.</p>}
+          {tab === 'transit' && <p className="text-xs text-slate-500">These assets were in an open transfer when the checklist was generated, so they are excluded from this audit.</p>}
           <DataTable columns={columns} rows={lines.data?.rows ?? []} total={lines.data?.total ?? 0} loading={lines.loading} page={ls.page} pageSize={ls.pageSize}
             onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} toolbar={cf.strip()} />
         </div>
@@ -176,7 +176,7 @@ export default function TaskPage() {
       <WrongDetailsModal line={wrong} taskId={id} onClose={() => setWrong(null)} onDone={refresh} />
       <ReviewModal r={review} taskId={id} onClose={() => setReview(null)} onDone={refresh} />
       <AddUnlistedModal open={addOpen} taskId={id} onClose={() => setAddOpen(false)} onDone={(dups) => { refresh(); if (dups) toast(`Added. ${dups} possible duplicate(s) found; IT will check them on review.`); }} />
-      <TextModal open={signOpen} title="Sign off campaign task" label="Sign-off note" submitLabel="Sign off" required={false} onClose={() => setSignOpen(false)}
+      <TextModal open={signOpen} title="Sign off audit task" label="Sign-off note" submitLabel="Sign off" required={false} onClose={() => setSignOpen(false)}
         onSubmit={async (note) => { await api(`/api/verification/tasks/${id}/sign-off`, { body: { note } }); toast('Signed off'); refresh(); }} />
       <TextModal open={reopenOpen} title="Reopen for the branch" label="Reason (sent to the branch)" submitLabel="Reopen" required onClose={() => setReopenOpen(false)}
         onSubmit={async (reason) => { await api(`/api/verification/tasks/${id}/reopen`, { body: { reason } }); toast('Reopened'); refresh(); }} />

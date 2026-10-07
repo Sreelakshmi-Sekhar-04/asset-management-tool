@@ -17,7 +17,7 @@ const NAV: { group: string; items: Item[] }[] = [
   ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
-    { href: '/campaigns', label: 'Campaigns' },
+    { href: '/campaigns', label: 'Physical Audit' },
     { href: '/renewals', label: 'Renewals' },
   ] },
   { group: 'Insight', items: [

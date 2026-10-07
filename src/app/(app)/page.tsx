@@ -73,12 +73,12 @@ export default function Dashboard() {
         <Card title="Flags">
           <ul className="space-y-1.5 text-sm">
             <li className="flex justify-between"><Link href="/assets?flag=TRANSFER_EXCEPTION">Transfer exception</Link><span>{d.flags.transferException}</span></li>
-            <li className="flex justify-between"><Link href="/assets?flag=MISSING">Missing (campaign)</Link><span>{d.flags.missing}</span></li>
+            <li className="flex justify-between"><Link href="/assets?flag=MISSING">Missing (physical audit)</Link><span>{d.flags.missing}</span></li>
             <li className="flex justify-between"><Link href="/reports/duplicates">Duplicate-suspect</Link><span>{d.flags.duplicateSuspect}</span></li>
           </ul>
         </Card>
-        <Card title="Campaign progress" className="lg:col-span-2" actions={<Link href="/campaigns" className="text-xs">All campaigns</Link>}>
-          {d.verification.length === 0 ? <p className="text-sm text-slate-500">No active campaigns.</p> : d.verification.map((c) => (
+        <Card title="Physical audit progress" className="lg:col-span-2" actions={<Link href="/campaigns" className="text-xs">All audits</Link>}>
+          {d.verification.length === 0 ? <p className="text-sm text-slate-500">No active physical audits.</p> : d.verification.map((c) => (
             <div key={c.id} className="mb-3 last:mb-0">
               <div className="flex flex-wrap justify-between gap-2 text-sm"><Link href={`/campaigns/${c.id}`} className="font-medium">{c.name}</Link><span className="text-xs text-slate-500">Due {fmtDateOnly(c.dueDate)}</span></div>
               <div className="mt-1 flex h-2 overflow-hidden rounded bg-slate-100">
