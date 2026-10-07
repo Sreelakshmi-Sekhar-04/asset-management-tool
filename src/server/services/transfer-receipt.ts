@@ -167,7 +167,8 @@ export async function receiveTransfer(actor: Actor, transferId: string, input: u
     if (!tr || !tr.approvalRequestId) throw notFound('Transfer');
     if (!(await canReceive(t, actor, tr.toLocationId))) throw forbidden(`Only the location manager of ${tr.toLocation.namePath.split(' / ').pop()} or an Administrator can confirm receipt.`);
     if (!['IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(tr.status)) throw conflict(`Transfer ${tr.transferNo} is ${tr.status.toLowerCase().replace(/_/g, ' ')}; there is nothing left to receive.`);
-    if (tr.approvedAt && receivedAt < tr.approvedAt) throw badRequest('The assets cannot have been received before the transfer was approved.', [{ field: 'receivedAt', message: 'Before the approval' }]);
+    // The form records minutes, so compare to the minute of the approval.
+    if (tr.approvedAt && receivedAt.getTime() < Math.floor(tr.approvedAt.getTime() / 60_000) * 60_000) throw badRequest('The assets cannot have been received before the transfer was approved.', [{ field: 'receivedAt', message: 'Before the approval' }]);
 
     const byId = new Map(tr.lines.map((l) => [l.id, l]));
     const inTransit = tr.lines.filter((l) => l.status === 'IN_TRANSIT');

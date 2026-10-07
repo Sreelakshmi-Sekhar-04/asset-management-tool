@@ -249,7 +249,7 @@ export async function decide(actor: Actor, requestId: string, decision: 'APPROVE
     const initiator = await actorForUser(t, req.initiatorId);
     await handler.execute(t, initiator, approved, approvers, actor);
     await audit(t, actor, { action: 'APPROVAL_EXECUTED', entityType: 'ApprovalRequest', entityId: req.id, entityLabel: req.requestNo, details: { action: req.action, approvers }, locationIds: req.locationIds });
-    await notifyUsers(t, [req.initiatorId], { type: req.action === 'TRANSFER' ? 'TRANSFER_DECIDED' : 'APPROVAL_DECIDED', title: `Approved: ${req.summary}`, body: `${req.requestNo} was approved by ${approvers} and has been applied.`, link: `/approvals?request=${req.id}`, eventKey: `approval:${req.id}:approved` });
+    await notifyUsers(t, [req.initiatorId], { type: req.action === 'TRANSFER' ? 'TRANSFER_DECIDED' : 'APPROVAL_DECIDED', title: `Approved: ${req.summary}`, body: req.action === 'TRANSFER' ? `${req.requestNo} was approved by ${approvers}. The assets move once the destination confirms receipt.` : `${req.requestNo} was approved by ${approvers} and has been applied.`, link: `/approvals?request=${req.id}`, eventKey: `approval:${req.id}:approved` });
     return { status: 'APPROVED' as const, requestNo: req.requestNo };
   }, { timeoutMs: 120_000 });
 }

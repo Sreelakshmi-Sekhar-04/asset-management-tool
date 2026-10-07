@@ -52,7 +52,7 @@ export default function ApprovalDetail() {
             <table className="tbl">
               <thead><tr><th>Asset ID</th><th>Asset name</th><th>Serial no.</th><th>Current location</th><th>Destination</th></tr></thead>
               <tbody>{r.transfer.assets.map((a) => (
-                <tr key={a.id}><td><Link href={`/assets/${a.id}`} className="font-semibold">{a.assetCode}</Link></td><td>{a.name}</td><td className="font-mono text-xs">{a.serialNumber ?? '—'}</td><td className="text-xs">{a.from ?? '—'}</td><td className="text-xs">{r.transfer!.to ?? '—'}</td></tr>
+                <tr key={a.id}><td><Link href={`/assets/${a.id}`} className="whitespace-nowrap font-semibold">{a.assetCode}</Link></td><td>{a.name}</td><td className="font-mono text-xs">{a.serialNumber ?? '—'}</td><td className="text-xs">{a.from ?? '—'}</td><td className="text-xs">{r.transfer!.to ?? '—'}</td></tr>
               ))}</tbody>
             </table>
           </div>

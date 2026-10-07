@@ -110,15 +110,15 @@ export function useAssetColumnFilters(ls: ListState) {
 
 export const Dash = () => <span className="text-slate-300">—</span>;
 
-/** "South / Kerala / Kochi" → Kochi in bold with "South · Kerala" beneath. */
+/** "Joy Alukkas / South India / Kerala / Kochi" → Kochi with its state (the level above) beneath; the full path on hover. */
 export function LocationCell({ path }: { path: string | null }) {
   if (!path) return <Dash />;
   const parts = path.split(' / ');
   const name = parts.pop();
   return (
-    <span className="block">
-      <span className="text-slate-800">{name}</span>
-      {parts.length > 0 && <span className="block text-[11px] text-slate-500">{parts.join(' · ')}</span>}
+    <span className="block" title={path}>
+      <span className="whitespace-nowrap text-slate-800">{name}</span>
+      {parts.length > 0 && <span className="block whitespace-nowrap text-[11px] text-slate-500">{parts.at(-1)}</span>}
     </span>
   );
 }

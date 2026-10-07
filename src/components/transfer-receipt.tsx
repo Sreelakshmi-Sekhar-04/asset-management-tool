@@ -46,18 +46,15 @@ export function TransferShipments({ requestId, onChanged }: { requestId: string;
           </p>
           <div className="table-wrap">
             <table className="tbl">
-              <thead><tr><th>Asset ID</th><th>Asset name</th><th>Serial no.</th><th>From</th><th>To</th><th>Transfer date</th><th>Status</th><th>Condition</th><th>Received</th><th>Remarks</th>{s.canClose && <th />}</tr></thead>
+              <thead><tr><th>Asset ID</th><th>Asset name</th><th>From → To</th><th>Status</th><th>Condition</th><th>Received</th><th>Remarks</th>{s.canClose && <th />}</tr></thead>
               <tbody>{s.lines.map((l) => (
                 <tr key={l.id}>
-                  <td><Link href={`/assets/${l.assetId}`} className="font-semibold">{l.assetCode}</Link></td>
-                  <td>{l.name}</td>
-                  <td className="font-mono text-xs">{l.serialNumber ?? '—'}</td>
-                  <td className="text-xs">{short(s.from)}</td>
-                  <td className="text-xs">{short(s.to)}</td>
-                  <td className="whitespace-nowrap text-xs">{fmtDateOnly(s.effectiveDate)}</td>
+                  <td><Link href={`/assets/${l.assetId}`} className="whitespace-nowrap font-semibold">{l.assetCode}</Link></td>
+                  <td>{l.name}<span className="block font-mono text-[11px] text-slate-500">S/N {l.serialNumber ?? '—'}</span></td>
+                  <td className="text-xs">{short(s.from)} → {short(s.to)}<span className="block text-[11px] text-slate-500">Transfer date {fmtDateOnly(s.effectiveDate)}</span></td>
                   <td><LineStatus s={l.status} />{l.exception && <span className="mt-1 block text-[11px] text-slate-500">Exception {l.exception.status.toLowerCase()}{l.exception.resolutionNote ? `: ${l.exception.resolutionNote}` : ''}</span>}</td>
                   <td>{l.condition ? <ReceiptCondition c={l.condition} /> : <span className="text-xs text-slate-400">—</span>}</td>
-                  <td className="whitespace-nowrap text-xs">{l.receivedAt ? <>{fmtDateTime(l.receivedAt)}<br />by {l.receivedByName}</> : '—'}</td>
+                  <td className="text-xs">{l.receivedAt ? <><span className="whitespace-nowrap">{fmtDateTime(l.receivedAt)}</span><br />by {l.receivedByName}</> : '—'}</td>
                   <td className="max-w-[16rem] text-xs">{l.remark ?? '—'}</td>
                   {s.canClose && <td>{l.exception?.status === 'OPEN' && <button className="btn btn-sm" onClick={() => { setClosing({ s, line: l }); setNote(''); }}>Close: stayed at source</button>}</td>}
                 </tr>
