@@ -2,8 +2,8 @@
  * DEVELOPMENT / UAT SEED DATA — NOT FOR PRODUCTION.
  *
  * Loads the small demo dataset: the Joy Alukkas organization and about 5 records of each kind
- * (3 users, 5 Kerala branches, 5 departments, 5 categories, 5 employees, 5 assets with their
- * warranty renewals, and a little assignment and transfer history). See scripts/demo-data.ts.
+ * (5 people, 3 of them with sign-ins, 5 Kerala branches, 5 departments, 5 categories, 5 assets
+ * with their warranty renewals, and a little assignment and transfer history). See scripts/demo-data.ts.
  * For a large organisation to test volume and load, use `npm run db:seed:large` instead.
  *
  * All demo accounts share one password, taken from SEED_DEMO_PASSWORD (default 'Demo#Pass2026').

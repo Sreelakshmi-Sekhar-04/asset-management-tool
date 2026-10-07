@@ -143,7 +143,7 @@ describe('assign to a location is a transfer with two approvals', () => {
     const r = await bulkAssign(w.it.actor, { assetIds: [stay.id, move.id], holder: { type: 'LOCATION', id: w.B.id }, dryRun: true }) as Result;
     expect(r.assignable).toBe(1);
     expect(r.skipped.map((s) => s.ref)).toEqual([stay.assetCode]);
-    expect(r.approvals).toEqual(['Admin manager: any Administrator', `Location manager: ${w.brB.user.name} (${w.B.name})`]);
+    expect(r.approvals).toEqual([`Admin manager: ${w.admin.user.name}`, `Location manager: ${w.brB.user.name} (${w.B.name})`]);
     expect(await asset(move.id)).toMatchObject({ locationId: w.A.id, transferStatus: 'NONE' });
     expect(await prisma.approvalRequest.count({ where: { assetIds: { has: move.id } } })).toBe(0);
   });

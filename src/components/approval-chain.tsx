@@ -26,7 +26,7 @@ export function ApprovalChain({ req }: { req: ApprovalReq }) {
           <div className="mb-1 text-xs font-medium text-slate-500">Step {o}{req.action === 'TRANSFER' && TRANSFER_STEP[o] ? `: ${TRANSFER_STEP[o]}` : ''}{req.tasks.filter((t) => t.stepOrder === o).length > 1 ? ' (all in parallel)' : ''}{o === req.currentOrder && req.status === 'PENDING' ? ' · current' : ''}</div>
           {req.tasks.filter((t) => t.stepOrder === o).map((t) => (
             <div key={t.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span>{t.approverType === 'ROLE' ? `Any ${ROLE_LABEL[t.approverRole ?? ''] ?? t.approverRole}` : t.approverType === 'HOLDER_MANAGER' ? "Holder's manager" : t.approverName ?? 'Named approver'}</span>
+              <span>{t.approverType === 'ROLE' ? `Any ${ROLE_LABEL[t.approverRole ?? ''] ?? t.approverRole}${t.approverName ? ` (${t.approverName})` : ''}` : t.approverType === 'HOLDER_MANAGER' ? "Holder's manager" : t.approverName ?? 'Named approver'}</span>
               <span className="flex items-center gap-2">
                 <Badge tone={TONE[t.status]}>{t.status.toLowerCase()}</Badge>
                 {t.decidedByName && <span className="text-xs text-slate-500">{t.decidedByName} · {fmtDateTime(t.decidedAt)}</span>}
