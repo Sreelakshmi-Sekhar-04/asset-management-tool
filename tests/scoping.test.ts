@@ -5,7 +5,7 @@ import { GET as auditRoute } from '@/app/api/audit/route';
 import { GET as reportRoute } from '@/app/api/reports/[key]/route';
 import { listAssets, getAssetDetail } from '@/server/services/assets';
 import { assignAsset } from '@/server/services/lifecycle';
-import { createTransfer, receive } from '@/server/services/transfers';
+import { bulkAssign } from '@/server/services/lifecycle';
 import { dashboard } from '@/server/services/dashboard';
 import { listEmployees } from '@/server/services/employees';
 import { prisma } from '@/lib/db';
@@ -63,12 +63,12 @@ describe('location scoping is enforced on the server', () => {
     expect(d.assets.total).toBe(all.total);
   });
 
-  it('a branch cannot raise a transfer from another branch, nor receive one addressed elsewhere', async () => {
-    await rejectsWith(createTransfer(w.brA.actor, { fromLocationId: w.C.id, toLocationId: w.A.id, reason: 'x', assetIds: [inC.id] }), 403);
-    const r = await createTransfer(w.it.actor, { fromLocationId: w.C.id, toLocationId: w.B.id, reason: 'Rebalance', assetIds: [inC.id] }) as { transfer: { id: string } };
-    await rejectsWith(receive(w.brA.actor, r.transfer.id, { all: 'RECEIVED', receivedByName: 'Someone' }), 404);
-    const denied = await prisma.auditLog.count({ where: { action: 'ACCESS_DENIED', entityId: r.transfer.id, actorId: w.brA.user.id } });
-    expect(denied).toBe(1);
+  it('a branch can neither transfer another branch\'s asset nor send one outside its own branch', async () => {
+    // Another branch's asset is not even visible to them.
+    await rejectsWith(bulkAssign(w.brA.actor, { assetIds: [inC.id], holder: { type: 'LOCATION', id: w.A.id } }), 400);
+    const mine = await w.asset(w.A.id);
+    await rejectsWith(bulkAssign(w.brA.actor, { assetIds: [mine.id], holder: { type: 'LOCATION', id: w.C.id } }), 403);
+    expect((await prisma.asset.findUniqueOrThrow({ where: { id: mine.id } })).locationId).toBe(w.A.id);
   });
 
   it('the audit log is closed to branch users and the denial is audited', async () => {

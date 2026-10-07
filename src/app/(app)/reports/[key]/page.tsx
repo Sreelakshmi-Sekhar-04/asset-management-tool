@@ -13,7 +13,7 @@ interface Res { title: string; columns: { key: string; header: string }[]; rows:
 
 const opts = (m: Record<string, string>) => Object.entries(m).map(([value, label]) => ({ value, label }));
 const STATUS_BY_REPORT: Record<string, Record<string, string>> = {
-  'asset-register': STATUS_LABEL, 'assets-by-holder': STATUS_LABEL, 'transfer-register': TRANSFER_STATUS_LABEL,
+  'asset-register': STATUS_LABEL, 'assets-by-holder': STATUS_LABEL, 'transfer-history': TRANSFER_STATUS_LABEL,
   exceptions: { OPEN: 'Open', RESOLVED: 'Resolved' }, 'verification-status': VER_TASK_LABEL, renewables: { ACTIVE: 'Active', EXPIRED: 'Expired', CANCELLED: 'Cancelled' },
 };
 

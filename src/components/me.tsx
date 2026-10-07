@@ -1,7 +1,14 @@
 'use client';
 import { createContext, useContext } from 'react';
 
-export interface Me { id: string; name: string; email: string; role: 'ADMIN' | 'IT_OPERATOR' | 'BRANCH_USER'; scopeName: string | null; locationId: string | null; orgName: string }
+export interface Me {
+  id: string; name: string; email: string; role: 'ADMIN' | 'IT_OPERATOR' | 'BRANCH_USER';
+  scopeName: string | null; locationId: string | null;
+  /** Organisation name from Settings (the branding in the sidebar). */
+  orgName: string;
+  /** The organization (head quarter, Joy Alukkas) whose data every screen shows. */
+  organization: { id: string; name: string } | null;
+}
 const Ctx = createContext<Me | null>(null);
 export const MeProvider = ({ me, children }: { me: Me; children: React.ReactNode }) => <Ctx.Provider value={me}>{children}</Ctx.Provider>;
 export function useMe() {

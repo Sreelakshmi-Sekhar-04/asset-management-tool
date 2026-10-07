@@ -6,6 +6,7 @@ import { DISPOSAL_LABEL, STATUS_LABEL } from '@/lib/labels';
 import type { Actor } from '../actor';
 import { audit, auditMany } from '../audit';
 import { assetScope, getScopedAsset } from '../scope';
+import { orgOfLocation } from '../org';
 import { createApprovalRequest, findPolicy, matchContextForAssets } from './approvals';
 import { assertNotRetired, assertUnlocked, holderColumns, holderName, holderOf, recordMovement, switchAssignment, validateHolder, type HolderRef } from './movement';
 import { assetWhere, type AssetFilters } from './assets';
@@ -33,6 +34,8 @@ export const assignInput = z.object({ holder: holderInput, remarks: z.string().t
 
 export async function assignAsset(actor: Actor, assetId: string, input: unknown) {
   const data = assignInput.parse(input);
+  // Assigning to a location IS a transfer (§3): same action, same entry point, no second workflow.
+  if (data.holder.type === 'LOCATION') return bulkAssign(actor, { assetIds: [assetId], holder: data.holder, remarks: data.remarks });
   return tx(async (t) => {
     const asset = await getScopedAsset(actor, assetId, t);
     await preAssign(t, actor, asset, data.holder);
@@ -47,7 +50,7 @@ async function preAssign(t: Db, actor: Actor, asset: Asset, holder: HolderRef, o
   if (asset.status === 'UNDER_REPAIR') throw conflict(`Asset ${asset.assetCode} is under repair and cannot be assigned. Complete the repair first.`);
   if (asset.status !== 'IN_STOCK' && asset.status !== 'ASSIGNED') throw conflict(`Asset ${asset.assetCode} must be In stock to be assigned.`);
   await assertUnlocked(t, [asset], opts.approvalId);
-  await validateHolder(t, actor, holder);
+  await validateHolder(t, actor, holder, await orgOfLocation(t, asset.locationId));
   const cur = holderOf(asset);
   if (cur && cur.type === holder.type && cur.id === holder.id) throw conflict(`Asset ${asset.assetCode} is already assigned to that holder.`);
 }
@@ -297,7 +300,55 @@ export async function bulkReassign(actor: Actor, assetIds: string[], toEmployeeI
   }, { timeoutMs: 120_000 });
 }
 
-// ───────────── Assign many at once (asset register multi-select) ─────────────
+// ───────────── Transfer: assign to a location (§2, §3) ─────────────
+
+/**
+ * Moving an asset to another location is a transfer, and it is the same action as assigning it
+ * to an employee: one step from the asset register, no draft, no separate workflow. The asset's
+ * current location becomes the destination; a holder that cannot travel with it (an employee or
+ * a department) is released; a location holder follows the asset. Every change is recorded as a
+ * movement and an audit entry, so the asset's history and audit trail stay complete.
+ */
+async function preTransfer(t: Db, actor: Actor, asset: Asset, to: { id: string; namePath: string }, opts: ExecOpts = {}) {
+  assertNotRetired(asset);
+  if (asset.status === 'UNDER_REPAIR') throw conflict(`Asset ${asset.assetCode} is under repair and cannot be transferred. Complete the repair first.`);
+  if (asset.locationId === to.id) throw conflict(`Asset ${asset.assetCode} is already at ${to.namePath}.`);
+  await assertUnlocked(t, [asset], opts.approvalId);
+  // Cross-organization moves are refused in the service layer, whatever the UI offered (§19).
+  await validateHolder(t, actor, { type: 'LOCATION', id: to.id }, await orgOfLocation(t, asset.locationId));
+}
+
+export async function execTransfer(t: Db, actor: Actor, asset: Asset, toLocationId: string, remarks: string | null, opts: ExecOpts = {}) {
+  const to = await t.location.findUniqueOrThrow({ where: { id: toLocationId }, select: { id: true, namePath: true } });
+  if (opts.approvalId) await preTransfer(t, actor, asset, to, opts);
+  const cur = holderOf(asset);
+  const holderTravels = cur?.type === 'LOCATION';
+  const nextHolder: HolderRef | null = holderTravels ? { type: 'LOCATION', id: to.id } : null;
+  const updated = await t.asset.update({
+    where: { id: asset.id },
+    data: {
+      locationId: to.id,
+      ...holderColumns(nextHolder),
+      status: nextHolder ? 'ASSIGNED' : 'IN_STOCK',
+      updatedById: actor.id === 'system' ? null : actor.id,
+    },
+  });
+  await switchAssignment(t, actor, asset.id, nextHolder, opts.approvalId ? 'APPROVAL' : 'MANUAL');
+  await recordMovement(t, actor, 'TRANSFERRED', asset, { id: asset.id, status: updated.status, locationId: to.id, holder: nextHolder }, {
+    remarks, approverName: opts.approverName,
+    reason: cur && !holderTravels ? `Transferred to ${to.namePath}; released from ${await holderName(t, cur.type, cur.id)}` : `Transferred to ${to.namePath}`,
+  });
+  await audit(t, actor, {
+    action: 'ASSET_TRANSFERRED', entityType: 'Asset', entityId: asset.id, entityLabel: asset.assetCode,
+    before: { locationId: asset.locationId, status: asset.status, holder: cur },
+    after: { locationId: to.id, location: to.namePath, status: updated.status, holder: nextHolder },
+    details: { remarks, approvedBy: opts.approverName, releasedHolder: cur && !holderTravels ? await holderName(t, cur.type, cur.id) : null },
+    locationIds: [asset.locationId, to.id],
+  });
+  return updated;
+}
+
+// ───────────── Assign / transfer from the asset register (one or many assets) ─────────────
 
 export const bulkAssignInput = z.object({
   assetIds: z.array(z.string()).max(2000).optional(),
@@ -312,10 +363,13 @@ export const bulkAssignInput = z.object({
 type BulkAssignProblem = { ref: string; message: string };
 
 /**
- * Assigns every selected asset to one holder in a single transaction, using the same checks,
- * history, audit and approval policy as a single assignment. Assets already with that holder
- * are skipped; assets that cannot be assigned (under repair, in an open transfer, retired …)
- * are listed and left untouched while the rest are assigned.
+ * One action behind the asset register's Assign button, for one asset or for many.
+ *   • an employee (or a department) holder  → the assets are assigned to them;
+ *   • a location                           → the assets are transferred there.
+ * Everything happens in a single transaction with the same checks, history, audit entries and
+ * approval policy as a single assignment. Assets that are already there are skipped; assets
+ * that cannot move (retired, under repair, locked by an approval …) are listed and left
+ * untouched while the rest go through.
  */
 export async function bulkAssign(actor: Actor, input: unknown) {
   const data = bulkAssignInput.parse(input);
@@ -324,22 +378,38 @@ export async function bulkAssign(actor: Actor, input: unknown) {
     if (!assets.length) throw badRequest('No assets selected.');
     if (assets.length > 2000) throw badRequest('At most 2,000 assets can be assigned at once.');
     const holder: HolderRef = data.holder;
-    await validateHolder(t, actor, holder);
-    const name = await holderName(t, holder.type, holder.id);
+    const isTransfer = holder.type === 'LOCATION';
+    const assetOrgIds = [...new Set(await Promise.all(assets.map((a) => orgOfLocation(t, a.locationId))))];
+    await validateHolder(t, actor, holder, assetOrgIds.length === 1 ? assetOrgIds[0] : null);
+    const name = (await holderName(t, holder.type, holder.id))!;
+    const to = isTransfer ? await t.location.findUniqueOrThrow({ where: { id: holder.id }, select: { id: true, namePath: true } }) : null;
     const skipped: BulkAssignProblem[] = [];
     const failed: BulkAssignProblem[] = [];
     const ok: Asset[] = [];
     for (const a of [...assets].sort((x, y) => x.assetCode.localeCompare(y.assetCode))) {
+      if (isTransfer && a.locationId === to!.id) { skipped.push({ ref: a.assetCode, message: `Already at ${name}` }); continue; }
       const cur = holderOf(a);
-      if (cur && cur.type === holder.type && cur.id === holder.id && a.status === 'ASSIGNED') { skipped.push({ ref: a.assetCode, message: `Already assigned to ${name}` }); continue; }
-      try { await preAssign(t, actor, a, holder); ok.push(a); } catch (e) { failed.push({ ref: a.assetCode, message: (e as Error).message }); }
+      if (!isTransfer && cur && cur.type === holder.type && cur.id === holder.id && a.status === 'ASSIGNED') { skipped.push({ ref: a.assetCode, message: `Already assigned to ${name}` }); continue; }
+      try {
+        if (isTransfer) await preTransfer(t, actor, a, to!);
+        else await preAssign(t, actor, a, holder);
+        ok.push(a);
+      } catch (e) { failed.push({ ref: a.assetCode, message: (e as Error).message }); }
     }
-    const result = { holder: name, selected: assets.length, skipped, failed };
+    const verb = isTransfer ? 'transferred' : 'assigned';
+    const released = isTransfer ? ok.filter((a) => { const h = holderOf(a); return h && h.type !== 'LOCATION'; }).length : 0;
+    const result = { mode: isTransfer ? ('TRANSFER' as const) : ('ASSIGN' as const), holder: name, selected: assets.length, skipped, failed, released };
     if (data.dryRun) return { ...result, assignable: ok.length, assigned: 0 };
-    if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be assigned to ${name}. Nothing was changed.`, [...failed, ...skipped]);
-    const g = await gate(t, actor, 'ASSIGN', ok, `Assign ${ok.length} asset(s) to ${name}`, { op: 'assign', assetIds: ok.map((a) => a.id), holder, remarks: data.remarks ?? null });
+    if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be ${verb} ${isTransfer ? 'to' : 'to'} ${name}. Nothing was changed.`, [...failed, ...skipped]);
+    const payload = isTransfer
+      ? { op: 'transfer', assetIds: ok.map((a) => a.id), toLocationId: to!.id, remarks: data.remarks ?? null }
+      : { op: 'assign', assetIds: ok.map((a) => a.id), holder, remarks: data.remarks ?? null };
+    const g = await gate(t, actor, 'ASSIGN', ok, `${isTransfer ? 'Transfer' : 'Assign'} ${ok.length} asset(s) to ${name}`, payload);
     if (g) return { ...result, assignable: ok.length, assigned: 0, ...g };
-    for (const a of ok) await execAssign(t, actor, a, holder, data.remarks ?? null);
+    for (const a of ok) {
+      if (isTransfer) await execTransfer(t, actor, a, to!.id, data.remarks ?? null);
+      else await execAssign(t, actor, a, holder, data.remarks ?? null);
+    }
     return { ...result, assignable: ok.length, assigned: ok.length };
   }, { timeoutMs: 120_000 });
 }

@@ -38,6 +38,9 @@ export async function listPeople(actor: Actor, q: PeopleQuery) {
   const isBranch = actor.role === 'BRANCH_USER';
   const where: Prisma.Sql[] = [];
   if (isBranch) where.push(Prisma.sql`p."employeeId" IS NOT NULL AND p."locIdPath" LIKE ${`${actor.scopeIdPath ?? '/__none__/'}%`}`);
+  // Organization context: people of another organization are never listed. A sign-in account
+  // with no employee record and no location is shown to IT, as before.
+  else if (actor.orgIdPath) where.push(Prisma.sql`(p."locIdPath" LIKE ${`${actor.orgIdPath}%`} OR p."locIdPath" IS NULL)`);
   const like = (v: string) => `%${v.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
   if (q.name) where.push(Prisma.sql`(p.name ILIKE ${like(q.name)} OR p.email ILIKE ${like(q.name)} OR p."userEmail" ILIKE ${like(q.name)})`);
   if (q.employeeCode) where.push(Prisma.sql`p."employeeCode" ILIKE ${like(q.employeeCode)}`);

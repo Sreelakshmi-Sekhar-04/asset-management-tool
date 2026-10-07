@@ -11,7 +11,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const actor = await currentActor();
   if (!actor) redirect('/login?expired=1');
   const s = await getSettings();
-  const me = { id: actor.id, name: actor.name, email: actor.email, role: actor.role, scopeName: actor.scopeName ?? null, locationId: actor.locationId ?? null, orgName: s.orgName };
+  const me = {
+    id: actor.id, name: actor.name, email: actor.email, role: actor.role,
+    scopeName: actor.scopeName ?? null, locationId: actor.locationId ?? null, orgName: s.orgName,
+    organization: actor.orgId ? { id: actor.orgId, name: actor.orgName ?? '' } : null,
+  };
   return (
     <MeProvider me={me}>
       <ToastProvider>

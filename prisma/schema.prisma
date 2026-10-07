@@ -21,6 +21,8 @@ enum Role {
 }
 
 enum LocationType {
+  /// Top of the tree: an organization / head quarter. Every other node sits under one.
+  ORGANIZATION
   REGION
   STATE
   BRANCH
@@ -58,6 +60,8 @@ enum MovementKind {
   RETIRED
   TRANSFER_RECEIVED
   TRANSFER_NOT_RECEIVED
+  /// Moved to another location straight from the asset register (assign to a location).
+  TRANSFERRED
   CORRECTION
 }
 
@@ -305,6 +309,7 @@ model Location {
 
   users            User[]
   employees        Employee[]
+  departments      Department[]         @relation("DepartmentOrganization")
   assets           Asset[]              @relation("AssetLocation")
   heldAssets       Asset[]              @relation("AssetHolderLocation")
   transfersFrom    Transfer[]           @relation("TransferFrom")
@@ -320,11 +325,15 @@ model Department {
   id        String     @id @default(cuid())
   name      String     @unique
   active    Boolean    @default(true)
+  /// The organization (a root location) this department belongs to; null = shared by all.
+  organizationId String?
+  organization   Location? @relation("DepartmentOrganization", fields: [organizationId], references: [id])
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   employees Employee[]
   assets    Asset[]    @relation("AssetHolderDepartment")
 
+  @@index([organizationId])
   @@map("departments")
 }
 

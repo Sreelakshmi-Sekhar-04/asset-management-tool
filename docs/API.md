@@ -33,7 +33,7 @@ Unexpected errors return 500 with a generic message. Details go to the server lo
 
 ### Approval-gated actions
 
-Assign, check-in, repair, retire, bulk status change, transfer submit and asset create may be held by an approval policy. The action then returns
+Assign (which covers transfers to a location), check-in, repair, retire, bulk status change and asset create may be held by an approval policy. The action then returns
 
 ```json
 { "pendingApproval": { "id": "…", "requestNo": "APR-000123", "policy": "High-value transfers" } }
@@ -68,7 +68,7 @@ Pull sources call a configured URL with a stored bearer token on a schedule and 
 
 ## ServiceDesk Plus reference
 
-Assets and transfers carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-INT-12). They are links only. No call is made to ServiceDesk Plus.
+Assets carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-INT-12). They are links only. No call is made to ServiceDesk Plus.
 
 ## Health
 
@@ -188,6 +188,9 @@ Assets and transfers carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-
 | `DELETE` | `/api/saved-filters/:id` | any signed-in |
 | `GET` | `/api/saved-filters` | any signed-in |
 | `POST` | `/api/saved-filters` | any signed-in |
+| `GET` | `/api/organizations` | any signed-in (`?manage=true`: ADMIN, every organization with counts) |
+| `POST` | `/api/organizations` | ADMIN (create; not offered in the UI while Joy Alukkas is the only organization) |
+| `PATCH` | `/api/organizations/[id]` | ADMIN (rename, activate, deactivate) |
 | `GET` | `/api/settings/public` | public |
 | `GET` | `/api/settings` | ADMIN, IT_OPERATOR |
 | `PATCH` | `/api/settings` | ADMIN |
@@ -195,19 +198,6 @@ Assets and transfers carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-
 | `PUT` | `/api/settings/asset-ids` | ADMIN |
 | `POST` | `/api/settings/asset-ids/preview` | ADMIN |
 | `PUT` | `/api/settings/labels` | ADMIN |
-| `POST` | `/api/transfers/:id/cancel` | any signed-in |
-| `GET` | `/api/transfers/:id/lines` | any signed-in |
-| `GET` | `/api/transfers/:id/note` | any signed-in |
-| `POST` | `/api/transfers/:id/recall` | ADMIN, IT_OPERATOR |
-| `POST` | `/api/transfers/:id/receive` | any signed-in |
-| `GET` | `/api/transfers/:id` | any signed-in |
-| `POST` | `/api/transfers/:id/submit` | any signed-in |
-| `POST` | `/api/transfers/exceptions/resolve` | ADMIN, IT_OPERATOR |
-| `GET` | `/api/transfers/exceptions` | any signed-in |
-| `GET` | `/api/transfers/inbox` | any signed-in |
-| `POST` | `/api/transfers/resolve-identifiers` | any signed-in |
-| `GET` | `/api/transfers` | any signed-in |
-| `POST` | `/api/transfers` | any signed-in |
 | `POST` | `/api/users/:id/invite` | ADMIN |
 | `POST` | `/api/users/:id/reset-password` | ADMIN |
 | `GET` | `/api/users/:id` | ADMIN, IT_OPERATOR |

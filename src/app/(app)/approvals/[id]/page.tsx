@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { fmtDateTime } from '@/lib/format';
-import { APPROVAL_ACTION_LABEL, label } from '@/lib/labels';
+import { HISTORIC_ACTION_LABEL, label } from '@/lib/labels';
 import { api, useApi } from '@/components/api';
 import { ApprovalChain, type ApprovalReq } from '@/components/approval-chain';
 import { useMe } from '@/components/me';
@@ -26,7 +26,7 @@ export default function ApprovalDetail() {
   return (
     <div className="max-w-4xl space-y-4">
       <PageHeader back={{ href: '/approvals', label: 'Approvals' }} title={<span className="flex items-center gap-2">{r.requestNo} <Badge tone={r.status === 'PENDING' ? 'amber' : r.status === 'APPROVED' ? 'green' : 'red'}>{r.status.toLowerCase()}</Badge></span>}
-        subtitle={`${label(APPROVAL_ACTION_LABEL, r.action)} · ${r.policyName}`}
+        subtitle={`${label(HISTORIC_ACTION_LABEL, r.action)} · ${r.policyName}`}
         actions={<>
           {r.canAct && <><button className="btn btn-primary" onClick={() => { setDecision('APPROVE'); setComment(''); }}>Approve</button><button className="btn btn-danger" onClick={() => { setDecision('REJECT'); setComment(''); }}>Reject</button></>}
           {r.canCancel && <button className="btn" onClick={async () => { try { await api(`/api/approvals/${r.id}/cancel`, { method: 'POST' }); toast('Request withdrawn'); reload(); } catch (e) { toast((e as Error).message, 'err'); } }}>Withdraw</button>}
@@ -36,7 +36,6 @@ export default function ApprovalDetail() {
         <dl className="kv">
           <dt>Summary</dt><dd>{r.summary}</dd>
           <dt>Raised by</dt><dd>{r.initiatorName} · {fmtDateTime(r.createdAt)}</dd>
-          {r.entityType === 'Transfer' && r.entityId && <><dt>Transfer</dt><dd><Link href={`/transfers/${r.entityId}`}>Open transfer</Link></dd></>}
           {r.assetIds.length > 0 && <><dt>Assets</dt><dd>{r.assetIds.length} asset(s){r.assetIds.length <= 20 && <> · {r.assetIds.map((a) => <Link key={a} href={`/assets/${a}`} className="mr-2">view</Link>)}</>}</dd></>}
           {r.decidedAt && <><dt>Decided</dt><dd>{fmtDateTime(r.decidedAt)}</dd></>}
           {r.failureReason && <><dt>Failed</dt><dd className="text-red-600">{r.failureReason}</dd></>}

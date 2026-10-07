@@ -23,7 +23,7 @@ Worker (src/worker/main.ts) ── job queue (imports) · email outbox · daily 
 
 | Path | Contents |
 |---|---|
-| `src/app/(app)/` | Signed-in screens: dashboard, assets, transfers, approvals, verification, renewals, reports, imports, employees, integrations, documents, audit, notifications, account, admin |
+| `src/app/(app)/` | Signed-in screens: dashboard, assets (assignment and transfer), approvals, verification, renewals, reports, imports, employees, integrations, documents, audit, notifications, account, admin |
 | `src/app/(auth)/` | Sign-in, password reset, invitation acceptance |
 | `src/app/api/` | JSON API (see [API.md](API.md)) |
 | `src/components/` | Shared UI: data table with URL-backed filters, forms, pickers, modals, documents panel |
@@ -49,7 +49,8 @@ Worker (src/worker/main.ts) ── job queue (imports) · email outbox · daily 
 
 ### Authorisation and location scoping
 - Roles: **Administrator** (everything, including configuration and users), **IT Operator** (all operational work across all locations), **Branch User** (own location subtree only).
-- Each location stores its materialised `idPath` (`/<root>/<state>/<branch>/`). A branch user's scope is their location's `idPath`. `src/server/scope.ts` turns it into a Prisma filter (`locationScope`, `assetScope`, `employeeScope`, `transferScope`). The helpers fail closed: a branch user with no location matches nothing.
+- Each location stores its materialised `idPath` (`/<organization>/<state>/<branch>/`). The first id in the path is the **organization** (head quarter) the record belongs to. `src/server/scope.ts` turns the caller's context into a Prisma filter (`locationScope`, `assetScope`, `employeeScope`, `departmentScope`, `transferScope`): a branch user is limited to their own location's `idPath`, everyone else to the organization they selected. The helpers fail closed: a branch user with no location matches nothing.
+- **Organization context (§11-19).** The application currently works with one organization, Joy Alukkas, so there is no organization selector in the header. The organization is resolved on the server for every request (`src/server/org.ts`, `actorFromToken`); the code still scopes every query by it, so a second organization can be added later without rework. A branch user always works in the organization above their own branch. Assigning or transferring across organizations is refused in `validateHolder`, independently of what the UI offered. The organization is viewed and edited only under Configuration → Organizations (`src/server/services/organizations.ts`); the Locations API refuses a location without a parent or of type `ORGANIZATION`, and a parent in another organization.
 - **Every** service that reads or writes scoped data applies these filters: lists, detail, search, lookups, dashboards, reports, exports, documents, notifications, approvals and verification. An out-of-scope record returns **404**, never 403, so no field of it leaks.
 - Role checks sit in both places. Route wrappers declare allowed roles, and services re-check them, so a new route cannot accidentally widen access. Denials of scoped actions are audited (`ACCESS_DENIED`).
 - Hiding a button is never the control. The automated tests call services and API handlers directly as branch users to prove this ([TESTING.md](TESTING.md)).
@@ -65,9 +66,15 @@ Worker (src/worker/main.ts) ── job queue (imports) · email outbox · daily 
 
 **Asset lifecycle.** `IN_STOCK ⇄ ASSIGNED`, `→ UNDER_REPAIR →`, `→ RETIRED` (terminal). "In transit" is a transfer state, not an asset status. Each change writes an `asset_movements` row (append-only history) and an audit entry. Actions that match an approval policy create an approval request instead of executing. The request's final approval executes the stored action, re-checking its preconditions at that moment.
 
-**Transfers.** Draft → (Pending approval) → In transit → Partially received → Completed, with Rejected, Cancelled and Recalled branches. While a line is open the asset is locked: it cannot be transferred again, assigned, repaired or retired. A unique partial index enforces this in the database. Receipt is per line. Received lines move the asset's location (and a location-type holder) to the destination. Not-received lines become exceptions that IT resolves as re-sent, located at sender, or written off.
+**Assignment and transfer.** Both are done from the asset register, through one action (`bulkAssign` in `lifecycle.ts`), for one asset or for many:
+- *to an employee or a department* — the holder changes, the asset's status becomes Assigned, and a holder period opens in the assignment history;
+- *to a location* — that is a **transfer**: the asset's location becomes the destination, an employee or department holding ends (the asset arrives In stock), a location holder travels with it, and the move is written to `asset_movements` as `TRANSFERRED` plus an `ASSET_TRANSFERRED` audit entry.
 
-**Approvals.** The first active policy (by priority) whose conditions all match applies. Steps with the same order number run in parallel and all must approve; higher numbers follow sequentially. Built-in rule when no transfer policy matches: branch-raised transfers need IT approval, IT-raised ones are auto-approved.
+A check step reports what will happen before anything changes; assets that cannot move are listed and left untouched while the rest go through. There is no draft, dispatch or receipt step and no separate transfer screen.
+
+**Transfer history.** The transfers raised by the earlier workflow (header, lines, receipts, exceptions and their movements) are kept and still readable in an asset's history, in the audit log and in the transfer-history and transfer-exception reports. The `20261006000000`/`20261006000001` migrations close any transfer that was still open, because no screen remains that could resolve it.
+
+**Approvals.** The first active policy (by priority) whose conditions all match applies. Steps with the same order number run in parallel and all must approve; higher numbers follow sequentially. Transfers are gated by **Assign** policies, since a transfer is an assignment to a location; the historical `TRANSFER` action is kept only so that past requests still read correctly.
 
 **Verification.** A campaign creates one task per branch with a frozen snapshot of that branch's assets. Assets in an open transfer are excluded and shown as in transit. The branch marks every line and submits, which locks the task. IT reviews Missing and Wrong-details lines and unlisted finds, then signs off. Accepted findings are applied: a Missing flag, corrected hostname, IP or holder, or a new asset for an unlisted find.
 
@@ -92,12 +99,11 @@ The FRD was followed wherever it is specific. Where it was silent or ambiguous, 
 6. Administrators may approve their own requests. No one else can (FR-TRF-03).
 7. **(confirm)** Asset-create policies apply to manual create, scan to register and bulk add. Imports, integration auto-create and verification unlisted finds do **not** go through asset-create policies. Imports are IT-only with a mandatory dry run and confirmation. Auto-create is an Administrator opt-in per source. Unlisted finds are already an IT review decision.
 
-**Transfers**
-8. Drafts do not lock assets. The lock starts at submission.
-9. A recall that leaves no line resolved makes the transfer Cancelled rather than Completed.
-10. A location-type holder at the sending branch moves with the asset on receipt. Employee and department holders are kept.
-11. Writing off a transfer exception retires the asset with disposal "Lost". It goes through retirement approval policies, and the asset is checked in only when the write-off actually executes, so a rejected write-off leaves it untouched.
-12. Aging reminders for in-transit transfers repeat weekly after the aging threshold.
+**Transfers (from the asset register)**
+8. A transfer takes effect at once; an asset waiting for an approval decision cannot be moved another way until it is decided.
+9. Transferring an asset held by an employee or a department ends that holding: the asset arrives In stock at the destination. A location holder moves with it.
+10. An asset that is retired, under repair, or already at the destination is refused and listed, and the other selected assets still move.
+11. An asset can never be assigned or transferred outside its own organization, whichever organization is selected.
 
 **Verification and branch users**
 13. Branch users cannot create assets directly. They report unlisted assets through a verification task, and IT decides.

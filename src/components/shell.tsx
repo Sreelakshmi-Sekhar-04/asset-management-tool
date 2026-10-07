@@ -14,10 +14,6 @@ const NAV: { group: string; items: Item[] }[] = [
   { group: '', items: [{ href: '/', label: 'Dashboard' }] },
   { group: 'Assets', items: [
     { href: '/assets', label: 'Asset register' },
-    { href: '/employees', label: 'Users & Employees' },
-  ] },
-  { group: 'Transfers', items: [
-    { href: '/transfers', label: 'Transfer register' },
   ] },
   { group: 'Work', items: [
     { href: '/approvals', label: 'Approvals' },
@@ -30,9 +26,12 @@ const NAV: { group: string; items: Item[] }[] = [
     { href: '/integrations', label: 'Integrations', roles: IT },
     { href: '/audit', label: 'Audit log', roles: IT },
   ] },
-  { group: 'Administration', items: [
+  // Organizations and the master data that hangs off them, then the rest of the configuration.
+  { group: 'Configuration', items: [
+    { href: '/admin/organizations', label: 'Organizations', roles: AD },
+    { href: '/admin/master-data', label: 'Departments & categories', roles: AD },
     { href: '/admin/locations', label: 'Locations', roles: AD },
-    { href: '/admin/master-data', label: 'Categories & departments', roles: AD },
+    { href: '/employees', label: 'Employees & users' },
     { href: '/admin/asset-ids', label: 'Asset IDs & labels', roles: AD },
     { href: '/admin/approval-policies', label: 'Approval policies', roles: AD },
     { href: '/admin/reminder-policies', label: 'Reminder policies', roles: AD },
@@ -41,7 +40,7 @@ const NAV: { group: string; items: Item[] }[] = [
   ] },
 ];
 /** Pages without a menu entry of their own, shown under the entry they are reached from. */
-const UNDER: [string, string][] = [['/scan', '/assets'], ['/imports', '/assets']];
+const UNDER: [string, string][] = [['/scan', '/assets'], ['/imports', '/assets'], ['/transfers', '/assets']];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const me = useMe();
@@ -53,12 +52,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
     let alive = true;
-    const tick = () => api<{ unread: number }>('/api/auth/me').then((r) => alive && setUnread(r.unread)).catch(() => undefined);
+    const tick = () => api<{ unread: number }>('/api/notifications/count').then((r) => alive && setUnread(r.unread)).catch(() => undefined);
     tick();
     const t = setInterval(tick, 60_000);
     window.addEventListener('itam:notifications', tick);
     return () => { alive = false; clearInterval(t); window.removeEventListener('itam:notifications', tick); };
-  }, [pathname]);
+    // Deliberately not keyed on the path: the unread count is polled and refreshed by event,
+    // so navigating between screens must not re-request it.
+  }, []);
   const under = (p: string) => UNDER.find(([from]) => p === from || p.startsWith(`${from}/`))?.[1] ?? p;
   const isActive = (href: string) => {
     const p = under(pathname);

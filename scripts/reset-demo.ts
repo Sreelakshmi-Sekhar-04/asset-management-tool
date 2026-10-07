@@ -7,7 +7,8 @@
  * Deletes ALL data (users, assets, employees, locations, transfers, audit log, history …)
  * from the database in DATABASE_URL, then creates 5 of each through the application's own
  * services: 3 users · 5 Kerala branches · 5 departments · 5 categories · 5 employees · 5 assets
- * (each with a warranty, so 5 renewables) · 5 transfers in different states.
+ * (each with a warranty, so 5 renewables), all in the Joy Alukkas organization, plus a little
+ * assignment and transfer history.
  * Side records the services write for those (movements, audit entries, notifications) remain.
  *
  * Kept: the schema and migration history, saved settings (organisation name, Asset ID format)

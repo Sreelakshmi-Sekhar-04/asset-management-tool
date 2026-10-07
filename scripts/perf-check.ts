@@ -11,7 +11,7 @@ import { prisma } from '@/lib/db';
 import { actorForUser } from '@/server/services/approvals';
 import { listAssets } from '@/server/services/assets';
 import { dashboard } from '@/server/services/dashboard';
-import { createTransfer } from '@/server/services/transfers';
+import { bulkAssign } from '@/server/services/lifecycle';
 import { confirmImport, runCommit, runValidation, startImport } from '@/server/import/engine';
 
 if (process.env.NODE_ENV === 'production') throw new Error('Refusing to run the performance check in production.');
@@ -49,18 +49,18 @@ async function main() {
   await time('Dashboard (IT)', 2000, () => dashboard(it));
   await time('Dashboard (branch)', 2000, () => dashboard(br));
 
-  // TC-NFR-03: 100-line transfer.
-  const free = (n: number, locId?: string) => prisma.asset.findMany({ where: { status: { in: ['IN_STOCK', 'ASSIGNED'] }, transferLines: { none: { status: { in: ['DRAFT', 'PENDING_APPROVAL', 'IN_TRANSIT'] } } }, ...(locId ? { locationId: locId } : {}) }, select: { id: true, locationId: true }, take: n });
+  // TC-NFR-03: transferring 100 assets in one action from the asset register.
+  const free = (n: number, locId?: string) => prisma.asset.findMany({ where: { status: { in: ['IN_STOCK', 'ASSIGNED'] }, ...(locId ? { locationId: locId } : {}) }, select: { id: true, locationId: true }, take: n });
   const branchWithMost = (await prisma.asset.groupBy({ by: ['locationId'], where: { status: { not: 'RETIRED' } }, _count: true, orderBy: { _count: { locationId: 'desc' } }, take: 1 }))[0];
   const dest = await prisma.location.findFirstOrThrow({ where: { type: 'BRANCH', active: true, id: { not: branchWithMost.locationId! } } });
   const hundred = await free(100, branchWithMost.locationId!);
-  await time('Submit a 100-line transfer', 3000, () => createTransfer(it, { fromLocationId: branchWithMost.locationId!, toLocationId: dest.id, reason: 'Performance check', assetIds: hundred.map((a) => a.id) }));
+  await time('Transfer 100 assets in one action', 5000, () => bulkAssign(it, { assetIds: hundred.map((a) => a.id), holder: { type: 'LOCATION', id: dest.id }, remarks: 'Performance check' }));
 
-  // TC-TRF-49: 20,000-line transfer (needs that many free assets in one branch; see db:generate-volume --branch).
-  const big = await free(20_000, branchWithMost.locationId!);
-  if (big.length >= 20_000) {
-    await time('Submit a 20,000-line transfer', 30_000, () => createTransfer(it, { fromLocationId: branchWithMost.locationId!, toLocationId: dest.id, reason: 'Performance check (large)', assetIds: big.map((a) => a.id) }));
-  } else console.log(`SKIP  20,000-line transfer: only ${big.length} free assets in one branch (generate with --branch)`);
+  // The register assigns or transfers up to 2,000 assets in one action.
+  const big = await free(2000, branchWithMost.locationId!);
+  if (big.length >= 2000) {
+    await time('Transfer 2,000 assets in one action', 60_000, () => bulkAssign(it, { assetIds: big.map((a) => a.id), holder: { type: 'LOCATION', id: dest.id }, remarks: 'Performance check (large)' }));
+  } else console.log(`SKIP  2,000-asset transfer: only ${big.length} free assets in one branch (generate with --branch)`);
 
   // TC-IMP-14: 20,000-row import, dry run + commit.
   const cat = await prisma.assetCategory.findFirstOrThrow({ where: { active: true, serialRequired: false } }).catch(() => prisma.assetCategory.findFirstOrThrow({ where: { active: true } }));

@@ -105,11 +105,11 @@ describe('partial updates keep fields the caller did not send', () => {
     expect(s.partial().parse({})).toEqual({ a: true });
   });
 
-  it('deactivating a category leaves its flags alone; renaming a region keeps its type', async () => {
+  it('deactivating a category leaves its flags alone; editing the organization keeps its type', async () => {
     await updateCategory(w.admin.actor, w.cat.id, { name: `Laptop ${w.s} renamed` });
     expect((await prisma.assetCategory.findUniqueOrThrow({ where: { id: w.cat.id } })).serialRequired).toBe(true);
     await updateLocation(w.admin.actor, w.region.id, { code: 'RG' });
-    expect((await prisma.location.findUniqueOrThrow({ where: { id: w.region.id } })).type).toBe('REGION');
+    expect((await prisma.location.findUniqueOrThrow({ where: { id: w.region.id } })).type).toBe('ORGANIZATION');
   });
 
   it('audit retention cannot be set below seven years', async () => {

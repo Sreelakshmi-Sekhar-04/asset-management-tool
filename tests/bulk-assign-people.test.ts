@@ -3,7 +3,6 @@ import { prisma } from '@/lib/db';
 import { assignAsset, bulkAssign, startRepair } from '@/server/services/lifecycle';
 import { createEmployee } from '@/server/services/employees';
 import { listPeople } from '@/server/services/people';
-import { createTransfer } from '@/server/services/transfers';
 import { updateUser } from '@/server/services/users';
 import { world, type World } from './fixtures';
 import { rejectsWith } from './helpers';
@@ -43,13 +42,12 @@ describe('assign many assets at once', () => {
     const repair = await w.asset(w.A.id);
     await startRepair(w.it.actor, repair.id, { reason: 'Broken screen' });
     const moving = await w.asset(w.A.id);
-    await createTransfer(w.it.actor, { fromLocationId: w.A.id, toLocationId: w.B.id, reason: 'Move', assetIds: [moving.id] });
     const already = await w.asset(w.A.id);
     await assignAsset(w.it.actor, already.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
     const r = await bulkAssign(w.it.actor, { assetIds: [ok.id, repair.id, moving.id, already.id], holder: { type: 'EMPLOYEE', id: w.empA.id } });
-    expect(r.assigned).toBe(1);
+    expect(r.assigned).toBe(2);
     expect(r.skipped.map((p) => p.ref)).toEqual([already.assetCode]);
-    expect(r.failed.map((p) => p.ref).sort()).toEqual([repair.assetCode, moving.assetCode].sort());
+    expect(r.failed.map((p) => p.ref)).toEqual([repair.assetCode]);
     expect((await prisma.asset.findUniqueOrThrow({ where: { id: repair.id } })).status).toBe('UNDER_REPAIR');
   });
 

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { fmtDateTime } from '@/lib/format';
-import { APPROVAL_ACTION_LABEL, label } from '@/lib/labels';
+import { HISTORIC_ACTION_LABEL, label } from '@/lib/labels';
 import { api, useApi } from '@/components/api';
 import type { ApprovalReq } from '@/components/approval-chain';
 import { DataTable, emptySelection, useListState, type Selection } from '@/components/list';
@@ -28,7 +28,7 @@ export default function Approvals() {
   const [comment, setComment] = useState('');
   const ids = sel.mode === 'ids' ? [...sel.ids] : [];
   const f = useColumnFilters(ls);
-  const actionFilter = f.option('action', 'Action', Object.entries(APPROVAL_ACTION_LABEL).map(([value, l]) => ({ value, label: l })), 'All actions');
+  const actionFilter = f.option('action', 'Action', Object.entries(HISTORIC_ACTION_LABEL).map(([value, l]) => ({ value, label: l })), 'All actions');
   const statusFilter = view !== 'actionable' ? f.option('status', 'Status', ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'FAILED'].map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() })), 'All statuses') : undefined;
   return (
     <div>
@@ -44,8 +44,8 @@ export default function Approvals() {
         selection={view === 'actionable' ? sel : undefined} onSelection={setSel} empty={view === 'actionable' ? 'Nothing is waiting for you.' : 'No requests.'}
         toolbar={f.strip()}
         columns={[
-          { key: 'requestNo', header: 'Request', render: (r) => <Link href={r.entityType === 'Transfer' && r.entityId ? `/transfers/${r.entityId}` : `/approvals/${r.id}`} className="font-medium">{r.requestNo}</Link> },
-          { key: 'action', header: 'Action', filter: actionFilter, render: (r) => label(APPROVAL_ACTION_LABEL, r.action) },
+          { key: 'requestNo', header: 'Request', render: (r) => <Link href={`/approvals/${r.id}`} className="font-medium">{r.requestNo}</Link> },
+          { key: 'action', header: 'Action', filter: actionFilter, render: (r) => label(HISTORIC_ACTION_LABEL, r.action) },
           { key: 'summary', header: 'Summary', render: (r) => <span className="text-xs">{r.summary}</span> },
           { key: 'policy', header: 'Rule', render: (r) => <span className="text-xs text-slate-500">{r.policyName}</span> },
           { key: 'by', header: 'Raised by', render: (r) => <span className="text-xs">{r.initiatorName}<br />{fmtDateTime(r.createdAt)}</span> },

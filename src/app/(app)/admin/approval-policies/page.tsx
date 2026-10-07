@@ -9,7 +9,7 @@ import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useConfir
 interface Step { stepOrder: number; approverType: 'USER' | 'ROLE' | 'HOLDER_MANAGER'; approverUserId: string | null; approverRole: string | null }
 interface Policy { id: string; name: string; action: string; priority: number; active: boolean; categoryIds: string[]; minCost: string | number | null; minQuantity: number | null; interState: boolean | null; initiatorRoles: string[]; steps: Step[] }
 type Form = Omit<Policy, 'id' | 'minCost' | 'minQuantity' | 'priority'> & { minCost: string; minQuantity: string; priority: string };
-const blank: Form = { name: '', action: 'TRANSFER', priority: '100', active: true, categoryIds: [], minCost: '', minQuantity: '', interState: null, initiatorRoles: [], steps: [{ stepOrder: 1, approverType: 'ROLE', approverUserId: null, approverRole: 'ADMIN' }] };
+const blank: Form = { name: '', action: 'ASSIGN', priority: '100', active: true, categoryIds: [], minCost: '', minQuantity: '', interState: null, initiatorRoles: [], steps: [{ stepOrder: 1, approverType: 'ROLE', approverUserId: null, approverRole: 'ADMIN' }] };
 
 export default function ApprovalPoliciesPage() {
   const me = useMe();

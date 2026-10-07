@@ -3,6 +3,7 @@ import { forbidden, unauthorized } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit } from '../audit';
 import { getSettings } from '../settings';
+import { resolveOrg } from '../org';
 import { DUMMY_HASH, hashPassword, passwordProblems, verifyPassword } from './password';
 import { randomToken, sha256 } from './tokens';
 import { hit } from '../rate-limit';
@@ -61,7 +62,7 @@ export async function login(emailRaw: string, password: string, ctx: { ip?: stri
 }
 
 /** Resolve a session token to an Actor, enforcing idle timeout (FR-CFG-09) and account state. */
-export async function actorFromToken(token: string | undefined | null, ctx: { ip?: string | null; userAgent?: string | null } = {}): Promise<Actor | null> {
+export async function actorFromToken(token: string | undefined | null, ctx: { ip?: string | null; userAgent?: string | null; orgId?: string | null } = {}): Promise<Actor | null> {
   if (!token) return null;
   const s = await getSettings();
   const session = await prisma.session.findUnique({
@@ -79,14 +80,19 @@ export async function actorFromToken(token: string | undefined | null, ctx: { ip
     await prisma.session.update({ where: { id: session.id }, data: { lastActiveAt: new Date() } });
   }
   const u = session.user;
+  const scopeIdPath = u.role === 'BRANCH_USER' ? u.location?.idPath ?? '/__none__/' : null;
+  const org = await resolveOrg(prisma, { role: u.role, scopeIdPath }, ctx.orgId);
   return {
     id: u.id,
     name: u.name,
     email: u.email,
     role: u.role,
     locationId: u.role === 'BRANCH_USER' ? u.locationId : null,
-    scopeIdPath: u.role === 'BRANCH_USER' ? u.location?.idPath ?? '/__none__/' : null,
+    scopeIdPath,
     scopeName: u.role === 'BRANCH_USER' ? u.location?.namePath ?? null : null,
+    orgId: org?.id ?? null,
+    orgIdPath: org?.idPath ?? null,
+    orgName: org?.name ?? null,
     employeeId: u.employeeId,
     sessionId: session.id,
     ip: ctx.ip ?? null,

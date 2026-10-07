@@ -6,6 +6,7 @@ import { AppError, badRequest, forbidden, toAppError, unauthorized } from '@/lib
 import { DEFAULT_PAGE_SIZE } from '@/lib/paging';
 import type { Actor } from './actor';
 import { actorFromToken, SESSION_COOKIE } from './auth/session';
+import { ORG_COOKIE } from './org';
 import { audit } from './audit';
 import { prisma } from '@/lib/db';
 
@@ -27,14 +28,15 @@ export const clientIp = (req: Request) => ipFromHeaders(req.headers);
 export async function actorFromRequest(req: NextRequest | Request): Promise<Actor | null> {
   const cookieHeader = req.headers.get('cookie') ?? '';
   const m = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
-  return actorFromToken(m?.[1], { ip: clientIp(req), userAgent: req.headers.get('user-agent') });
+  const o = cookieHeader.match(new RegExp(`(?:^|;\\s*)${ORG_COOKIE}=([^;]+)`));
+  return actorFromToken(m?.[1], { ip: clientIp(req), userAgent: req.headers.get('user-agent'), orgId: o?.[1] });
 }
 
 /** For server components. */
 export async function currentActor(): Promise<Actor | null> {
   const c = await cookies();
   const h = await headers();
-  return actorFromToken(c.get(SESSION_COOKIE)?.value, { ip: ipFromHeaders(h), userAgent: h.get('user-agent') });
+  return actorFromToken(c.get(SESSION_COOKIE)?.value, { ip: ipFromHeaders(h), userAgent: h.get('user-agent'), orgId: c.get(ORG_COOKIE)?.value });
 }
 
 type Ctx<P> = { req: NextRequest; actor: Actor; params: P; url: URL };

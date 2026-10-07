@@ -14,11 +14,15 @@ export const HOLDER_TYPE_LABEL: Record<string, string> = { EMPLOYEE: 'Employee',
 export const MOVEMENT_LABEL: Record<string, string> = {
   REGISTERED: 'Registered', IMPORTED: 'Imported', ASSIGNED: 'Assigned', CHECKED_IN: 'Checked in',
   REPAIR_STARTED: 'Repair started', REPAIR_COMPLETED: 'Repair completed', RETIRED: 'Retired',
-  TRANSFER_RECEIVED: 'Transfer received', TRANSFER_NOT_RECEIVED: 'Transfer not received', CORRECTION: 'Correction',
+  TRANSFER_RECEIVED: 'Transfer received', TRANSFER_NOT_RECEIVED: 'Transfer not received', TRANSFERRED: 'Transferred',
+  CORRECTION: 'Correction',
 };
+/** Assign covers transfers too: a transfer is an assignment to a location. */
 export const APPROVAL_ACTION_LABEL: Record<string, string> = {
-  ASSET_CREATE: 'Asset create', ASSIGN: 'Assign', CHECK_IN: 'Check-in', TRANSFER: 'Transfer', RETIRE: 'Retire', STATUS_CHANGE: 'Repair / status change',
+  ASSET_CREATE: 'Asset create', ASSIGN: 'Assign / transfer', CHECK_IN: 'Check-in', RETIRE: 'Retire', STATUS_CHANGE: 'Repair / status change',
 };
+/** Historical label, for requests raised by the retired transfer workflow. */
+export const HISTORIC_ACTION_LABEL: Record<string, string> = { ...APPROVAL_ACTION_LABEL, TRANSFER: 'Transfer (historical)' };
 export const RENEWABLE_TYPE_LABEL: Record<string, string> = {
   WARRANTY: 'Warranty', LICENCE: 'Licence', SUBSCRIPTION: 'Subscription', AMC: 'AMC', CALIBRATION: 'Calibration',
   INSURANCE: 'Insurance', CERTIFICATE: 'Certificate', OTHER: 'Other',

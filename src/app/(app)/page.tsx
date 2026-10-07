@@ -13,8 +13,7 @@ interface Dash {
   byLocation: { id: string; name: string; total: number; assigned: number; inStock: number; underRepair: number }[];
   byLocationLabel: string;
   flags: { transferException: number; missing: number; duplicateSuspect: number };
-  transfers: { open: number; inTransit: number; aging: number; agingDays: number };
-  exceptionsOpen: number;
+  transfers: { recent: number };
   approvals: { total: number; mine: boolean };
   expiring: { d30: number; d60: number; d90: number; expired: number; warranty90: number };
   verification: { id: string; name: string; dueDate: string; tasks: number; notStarted: number; inProgress: number; submitted: number; signedOff: number; overdue: number }[];
@@ -37,9 +36,7 @@ export default function Dashboard() {
         <Stat label="Under repair" value={d.assets.underRepair} href="/assets?status=UNDER_REPAIR" tone={d.assets.underRepair ? 'amber' : undefined} />
         <Stat label="Retired" value={d.assets.retired} href="/reports/retired" />
         <Stat label={d.approvals.mine ? 'My pending requests' : 'Awaiting my approval'} value={d.approvals.total} href="/approvals" tone={d.approvals.total ? 'amber' : undefined} />
-        <Stat label="Open transfers" value={d.transfers.open} href="/transfers?status=PENDING_APPROVAL&status=IN_TRANSIT&status=PARTIALLY_RECEIVED" />
-        <Stat label="In transit" value={d.transfers.inTransit} href="/reports/in-transit" hint={d.transfers.aging ? `${d.transfers.aging} past ${d.transfers.agingDays} days` : undefined} tone={d.transfers.aging ? 'red' : undefined} />
-        <Stat label="Open exceptions" value={d.exceptionsOpen} href="/transfers?view=exceptions&status=OPEN" tone={d.exceptionsOpen ? 'red' : undefined} />
+        <Stat label="Transferred ≤ 30 days" value={d.transfers.recent} href="/reports/transfer-history" />
         <Stat label="Expiring ≤ 30 days" value={d.expiring.d30} href="/reports/expiry-outlook?withinDays=30" tone={d.expiring.d30 ? 'amber' : undefined} />
         <Stat label="Expiring ≤ 60 days" value={d.expiring.d60} href="/reports/expiry-outlook?withinDays=60" />
         <Stat label="Expiring ≤ 90 days" value={d.expiring.d90} href="/reports/expiry-outlook?withinDays=90" hint={d.expiring.expired ? `${d.expiring.expired} already expired` : undefined} />

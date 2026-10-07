@@ -1,15 +1,18 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, qs, useApi } from './api';
+import { api, clearCachedApi, qs, useApi, useCachedApi } from './api';
 import clsx from 'clsx';
 
 export interface Loc { id: string; name: string; namePath: string; type: string; depth: number; active: boolean; assetCount: number; effectiveState: string | null; parentId: string | null; code: string | null; state: string | null; email: string | null }
 export interface Cat { id: string; name: string; code: string | null; serialRequired: boolean; individuallyTracked: boolean; isSoftware: boolean; active: boolean; assetCount: number }
 export interface Dept { id: string; name: string; active: boolean }
 
-export const useLocations = (includeInactive = false, all = false) => useApi<Loc[]>(`/api/locations${includeInactive || all ? '?' : ''}${includeInactive ? 'includeInactive=true&' : ''}${all ? 'all=true' : ''}`);
-export const useCategories = () => useApi<Cat[]>('/api/categories');
-export const useDepartments = () => useApi<Dept[]>('/api/departments');
+export const useLocations = (includeInactive = false, all = false) => useCachedApi<Loc[]>(`/api/locations${includeInactive || all ? '?' : ''}${includeInactive ? 'includeInactive=true&' : ''}${all ? 'all=true' : ''}`);
+export const useCategories = () => useCachedApi<Cat[]>('/api/categories');
+export const useDepartments = () => useCachedApi<Dept[]>('/api/departments');
+
+/** Call after editing locations, categories or departments so every screen sees the change. */
+export const refreshMasterData = () => { clearCachedApi('/api/locations'); clearCachedApi('/api/categories'); clearCachedApi('/api/departments'); };
 
 export function LocationSelect({ value, onChange, placeholder = 'Choose a location', types, className, required, allowEmpty = true, id, all }: {
   value: string; onChange: (id: string) => void; placeholder?: string; types?: string[]; className?: string; required?: boolean; allowEmpty?: boolean; id?: string; all?: boolean;

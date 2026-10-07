@@ -12,7 +12,7 @@ import { Badge, ErrorBox, PageHeader } from '@/components/ui';
 interface Doc { id: string; entityType: string; entityId: string; fileName: string; mimeType: string; sizeBytes: number; description: string | null; uploadedByName: string; createdAt: string; scanStatus: string; deletedAt: string | null }
 
 const ENTITY: Record<string, string> = { ASSET: 'Asset', TRANSFER: 'Transfer', TRANSFER_RECEIPT: 'Transfer receipt', RENEWABLE: 'Renewable', VERIFICATION_TASK: 'Campaign task', ORGANISATION: 'Organisation' };
-const link = (d: Doc) => ({ ASSET: `/assets/${d.entityId}`, TRANSFER: `/transfers/${d.entityId}`, RENEWABLE: `/renewals/${d.entityId}`, VERIFICATION_TASK: `/campaigns/tasks/${d.entityId}` } as Record<string, string>)[d.entityType];
+const link = (d: Doc) => ({ ASSET: `/assets/${d.entityId}`, RENEWABLE: `/renewals/${d.entityId}`, VERIFICATION_TASK: `/campaigns/tasks/${d.entityId}` } as Record<string, string>)[d.entityType];
 const kb = (n: number) => (n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 function Inner() {

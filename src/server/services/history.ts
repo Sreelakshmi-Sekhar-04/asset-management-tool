@@ -8,7 +8,7 @@ import { getScopedAsset, inScopePath } from '../scope';
 
 export interface TimelineItem { at: Date; effectiveAt?: Date | null; kind: string; title: string; actor: string | null; details: string[]; ref?: { type: string; id: string; label: string } }
 
-const MOVEMENT_AUDITS = new Set(['ASSET_CREATED', 'ASSET_ASSIGNED', 'ASSET_REASSIGNED', 'ASSET_CHECKED_IN', 'ASSET_STATUS_CHANGED', 'ASSET_RETIRED', 'ASSET_CORRECTED', 'TRANSFER_LINE_RECEIVED', 'TRANSFER_LINE_REJECTED']);
+const MOVEMENT_AUDITS = new Set(['ASSET_CREATED', 'ASSET_ASSIGNED', 'ASSET_REASSIGNED', 'ASSET_CHECKED_IN', 'ASSET_STATUS_CHANGED', 'ASSET_RETIRED', 'ASSET_CORRECTED', 'ASSET_TRANSFERRED', 'TRANSFER_LINE_RECEIVED', 'TRANSFER_LINE_REJECTED']);
 
 const AUDIT_TITLE: Record<string, string> = {
   ASSET_UPDATED: 'Details edited', APPROVAL_REQUESTED: 'Approval requested', DUPLICATE_FLAG_CLEARED: 'Duplicate flag cleared', ASSET_FLAG_CLEARED: 'Flag cleared',
@@ -42,6 +42,7 @@ export async function assetTimeline(actor: Actor, idOrCode: string): Promise<Tim
     if (m.kind === 'REGISTERED' || m.kind === 'IMPORTED') { title = m.kind === 'IMPORTED' ? 'Asset imported' : 'Asset created'; if (m.toLocationName) d.push(`Location: ${m.toLocationName}`); }
     else if (m.kind === 'ASSIGNED') { title = `Assigned to ${m.toHolderName}`; if (m.fromHolderName) d.push(`Previous holder: ${m.fromHolderName}`); }
     else if (m.kind === 'CHECKED_IN') { title = `Checked in from ${m.fromHolderName ?? '—'}`; if (m.condition) d.push(`Condition: ${m.condition}`); }
+    else if (m.kind === 'TRANSFERRED') { title = `Transferred to ${m.toLocationName}`; if (m.fromLocationName) d.push(`From: ${m.fromLocationName}`); if (m.fromHolderName && !m.toHolderName) d.push(`Released from: ${m.fromHolderName}`); }
     else if (m.kind === 'TRANSFER_RECEIVED') { title = `Received at ${m.toLocationName}`; d.push(`From: ${m.fromLocationName}`); if (m.approverName) d.push(`Approved by: ${m.approverName}`); if (m.receivedByName) d.push(`Received by: ${m.receivedByName}`); }
     else if (m.kind === 'TRANSFER_NOT_RECEIVED') { title = `Not received at destination — remains at ${m.fromLocationName}`; if (m.receivedByName) d.push(`Recorded by: ${m.receivedByName}`); }
     else if (m.kind === 'REPAIR_STARTED' || m.kind === 'REPAIR_COMPLETED' || m.kind === 'RETIRED') { if (m.toStatus) d.push(`Status: ${STATUS_LABEL[m.fromStatus ?? ''] ?? '—'} → ${STATUS_LABEL[m.toStatus]}`); }

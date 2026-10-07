@@ -4,6 +4,7 @@ import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import { APPROVAL_ACTION_LABEL } from '@/lib/labels';
 import type { Actor } from '../actor';
+import { resolveOrg } from '../org';
 import { audit } from '../audit';
 import { notifyUsers } from '../notify';
 
@@ -189,9 +190,16 @@ async function handlerFor(action: ApprovalAction): Promise<Handler> {
   return approvalHandlers[action];
 }
 
-export async function actorForUser(db: Db, userId: string): Promise<Actor> {
+export async function actorForUser(db: Db, userId: string, orgId?: string | null): Promise<Actor> {
   const u = await db.user.findUniqueOrThrow({ where: { id: userId }, include: { location: true } });
-  return { id: u.id, name: u.name, email: u.email, role: u.role, locationId: u.role === 'BRANCH_USER' ? u.locationId : null, scopeIdPath: u.role === 'BRANCH_USER' ? u.location?.idPath ?? null : null, scopeName: u.location?.namePath ?? null, employeeId: u.employeeId };
+  const scopeIdPath = u.role === 'BRANCH_USER' ? u.location?.idPath ?? null : null;
+  const org = await resolveOrg(db, { role: u.role, scopeIdPath }, orgId);
+  return {
+    id: u.id, name: u.name, email: u.email, role: u.role,
+    locationId: u.role === 'BRANCH_USER' ? u.locationId : null, scopeIdPath, scopeName: u.location?.namePath ?? null,
+    orgId: org?.id ?? null, orgIdPath: org?.idPath ?? null, orgName: org?.name ?? null,
+    employeeId: u.employeeId,
+  };
 }
 
 export async function decide(actor: Actor, requestId: string, decision: 'APPROVE' | 'REJECT', comment?: string | null) {
