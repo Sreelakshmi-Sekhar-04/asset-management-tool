@@ -64,7 +64,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
             <div className="flex items-end"><button className="btn btn-primary w-full" disabled={busy}>{busy && <Spinner className="h-3 w-3" />}Upload and dry run</button></div>
           </div>
           {type !== 'BRANCH_USERS' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />Create locations and departments that don’t exist yet (listed in the dry run before you confirm)</label>}
-          {assetsOnly && <p className="text-xs text-slate-500">Serial numbers in the file are checked the same way as scanned ones: a serial that repeats in the file, or is already in the register, is flagged on its row before anything is saved.</p>}
+          {assetsOnly && <p className="text-xs text-slate-500">Serial numbers in the file are checked the same way as scanned ones: a serial that repeats in the file, or is already in the register, is flagged on its row before anything is saved. In the preview you can correct any row, and scan or type missing serial numbers, before you confirm.</p>}
           <div className="flex flex-wrap gap-2 text-sm">
             Template: <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=xlsx`)}>Excel</button>
             <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=csv`)}>CSV</button>

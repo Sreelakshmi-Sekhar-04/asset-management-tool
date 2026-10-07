@@ -119,7 +119,7 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
         if (!same) changes[k] = nv;
       }
       const matchedOn = serial && bySerial.get(serial.toLowerCase()) === match ? `serial ${serial}` : `legacy tag ${tag}`;
-      if (!Object.keys(changes).length) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'UNCHANGED', messages: [`Matches ${match.assetCode} on ${matchedOn}; no changes.`], matchedId: match.id, plan }); await tick(i); continue; }
+      if (!Object.keys(changes).length) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'UNCHANGED', messages: [`Duplicate of ${match.assetCode} (same ${matchedOn}, same details); it will not be imported again.`], matchedId: match.id, plan }); await tick(i); continue; }
       if (ctx.mode === 'CREATE_ONLY') { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'REJECTED', messages: [`Duplicate: ${matchedOn} already exists on ${match.assetCode}${match.status === 'RETIRED' ? ' (retired)' : ''}. Use "Create or update" mode to update it.`], matchedId: match.id, plan }); await tick(i); continue; }
       if (match.status === 'RETIRED') { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'REJECTED', messages: [`${match.assetCode} (${matchedOn}) is retired and cannot be updated.`], matchedId: match.id, plan }); await tick(i); continue; }
       if (changes.legacyTag && byTag.get(String(changes.legacyTag).toLowerCase()) && byTag.get(String(changes.legacyTag).toLowerCase()) !== match) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'REJECTED', messages: [`Legacy tag ${changes.legacyTag} already belongs to ${byTag.get(String(changes.legacyTag).toLowerCase())!.assetCode}.`], matchedId: match.id, plan }); await tick(i); continue; }
@@ -134,7 +134,7 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
     }
     // Idempotent re-import of serial-less rows (FR-IMP-08)
     const fpMatch = byFp.get(plan.fingerprint);
-    if (fpMatch && !serial && !tag) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'UNCHANGED', messages: [`Already imported as ${fpMatch.assetCode}.`], matchedId: fpMatch.id, plan }); await tick(i); continue; }
+    if (fpMatch && !serial && !tag) { results.push({ rowNumber: r.rowNumber, data: d, outcome: 'UNCHANGED', messages: [`Duplicate: already imported as ${fpMatch.assetCode}; it will not be imported again.`], matchedId: fpMatch.id, plan }); await tick(i); continue; }
     const w = dupWarnings(host, ip, null);
     if (host) { const k = host.toLowerCase(); if (fileHost.has(k)) w.messages.push(`Hostname "${host}" also appears on row ${fileHost.get(k)}.`); else fileHost.set(k, r.rowNumber); }
     if (ip) { if (fileIp.has(ip)) w.messages.push(`IP "${ip}" also appears on row ${fileIp.get(ip)}.`); else fileIp.set(ip, r.rowNumber); }
