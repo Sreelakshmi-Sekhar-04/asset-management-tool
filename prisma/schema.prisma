@@ -1088,6 +1088,10 @@ model ImportRow {
   matchedId  String?
   resultId   String?
   resultCode String?
+  /// Ticked in the preview: only selected, valid rows are imported.
+  selected   Boolean     @default(true)
+  /// Removed from this import batch in the preview (never deletes an asset or master data).
+  removed    Boolean     @default(false)
 
   @@unique([jobId, rowNumber])
   @@index([jobId, outcome])

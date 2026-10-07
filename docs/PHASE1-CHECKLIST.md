@@ -37,7 +37,7 @@ Summary: **114 of 114** Phase 1 requirements implemented. FR-VER-11 (a 10-day-cu
 | FR-IMP-03 | Dry-run first: | A | Done | src/server/import/engine.ts |
 | FR-IMP-04 | Row-level validation: | A | Done | src/server/import/assets.ts `validateAssets` (incl. in-file duplicates) |
 | FR-IMP-05 | Result report, downloadable as CSV: | A | Done | src/server/import/engine.ts |
-| FR-IMP-06 | The location column accepts a path such as Region/Branch; unknown nodes may be auto-created if the user ticks "create… | A | Done | src/server/import/assets.ts + locations `resolveLocationPath`; "create missing locations" option |
+| FR-IMP-06 | The location column accepts a path such as Region/Branch; unknown nodes may be auto-created if the user ticks "create… | A | Done | src/server/import/assets.ts (LocationResolver). Asset imports no longer auto-create: a missing location (or department) is shown as "Location not found" in the preview, with "Add location" / "Add department" there; employee imports keep the "create missing" option |
 | FR-IMP-07 | Modes: | A | Done | src/server/import/assets.ts |
 | FR-IMP-08 | Idempotent and re-runnable: | A | Done | src/server/import/assets.ts |
 | FR-IMP-09 | Imported holder columns (employee ID) create assignments as the initial state, recorded in history as "Imported". | A | Done | src/server/import/assets.ts `applyAssets` (IMPORTED + ASSIGNED movements) |

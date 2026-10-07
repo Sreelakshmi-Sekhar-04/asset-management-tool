@@ -87,8 +87,9 @@ describe('imports', () => {
   it('a commit refuses to apply when the data changed after the dry run', async () => {
     const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'b.csv', data: csv([`${w.cat.name},HP,EliteBook,DRIFT-${w.s},${loc()}`]) });
     await runValidation(job.id);
-    await w.asset(w.A.id, { serialNumber: `DRIFT-${w.s}` });
     await confirmImport(w.it.actor, job.id);
+    // Confirm checks every row again, so the change that matters is one made after it.
+    await w.asset(w.A.id, { serialNumber: `DRIFT-${w.s}` });
     await runCommit(job.id);
     const j = await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } });
     expect(j.status).toBe('FAILED');
@@ -101,7 +102,7 @@ describe('imports', () => {
     await runValidation(job.id);
     const { rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 });
     expect(rows[0].outcome).toBe('REJECTED');
-    expect(rows[0].messages.join(' ')).toMatch(/Unknown location.*Duplicate: serial TAKEN-.* already exists on /);
+    expect(rows[0].messages.join(' ')).toMatch(/Location not found.*Duplicate: serial TAKEN-.* already exists on /);
     expect((rows[0] as { view?: { asset: { id: string } | null } }).view?.asset?.id).toBe(taken.id);
   });
 

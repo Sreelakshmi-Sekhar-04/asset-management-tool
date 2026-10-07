@@ -14,6 +14,7 @@ import { aliasMap, COLUMNS } from './templates';
 import { applyAssets, validateAssets } from './assets';
 import { applyBranchUsers, applyEmployees, validateBranchUsers, validateEmployees } from './employees';
 import type { RowResult, ValidationResult } from './common';
+import { importRowStatus, LOCATION_MISSING, DEPARTMENT_MISSING, missingValue, ROW_FILTERS, type ImportRowStatus } from '@/lib/import-row-status';
 
 /**
  * Starts the dry run of an uploaded file. There is no mode to choose: each row is matched against
@@ -33,20 +34,23 @@ export async function startImport(actor: Actor, p: { type: ImportType; mode?: 'C
   await parseTabular(p.fileName, p.data, aliasMap(COLUMNS[p.type]));
   const key = newKey('imports', p.fileName.toLowerCase().endsWith('.csv') ? '.csv' : '.xlsx');
   await putObject(key, p.data);
-  const job = await prisma.importJob.create({ data: { type: p.type, mode, createMissing: p.createMissing, fileName: p.fileName.slice(0, 200), storageKey: key, createdById: actor.id, createdByName: actor.name } });
+  // Asset imports never create locations: a missing one is added from the preview, by a person.
+  const createMissing = p.type !== 'ASSETS' && p.createMissing;
+  const job = await prisma.importJob.create({ data: { type: p.type, mode, createMissing, fileName: p.fileName.slice(0, 200), storageKey: key, createdById: actor.id, createdByName: actor.name } });
   await enqueue('import.validate', { jobId: job.id });
-  await audit(prisma, actor, { action: 'IMPORT_UPLOADED', entityType: 'Import', entityId: job.id, entityLabel: job.fileName, details: { type: p.type, mode, createMissing: p.createMissing, bytes: p.data.length } });
+  await audit(prisma, actor, { action: 'IMPORT_UPLOADED', entityType: 'Import', entityId: job.id, entityLabel: job.fileName, details: { type: p.type, mode, createMissing, bytes: p.data.length } });
   return job;
 }
 
 /**
  * The rows to check. The first dry run reads the uploaded file; after that the stored rows are the
  * source, because they carry the corrections made in the preview, and those are what get imported.
+ * Rows removed from the batch in the preview are left out: they are no longer part of the import.
  */
 async function sourceRows(db: Db, job: ImportJob): Promise<ParsedRow[]> {
   if (job.validatedAt) {
-    const stored = await db.importRow.findMany({ where: { jobId: job.id }, orderBy: { rowNumber: 'asc' }, select: { rowNumber: true, data: true } });
-    if (stored.length) return stored.map((r) => ({ rowNumber: r.rowNumber, data: r.data as Record<string, string> }));
+    const stored = await db.importRow.findMany({ where: { jobId: job.id }, orderBy: { rowNumber: 'asc' }, select: { rowNumber: true, data: true, removed: true } });
+    if (stored.length) return stored.filter((r) => !r.removed).map((r) => ({ rowNumber: r.rowNumber, data: r.data as Record<string, string> }));
   }
   const { rows } = await parseTabular(job.fileName, await getObject(job.storageKey), aliasMap(COLUMNS[job.type]));
   await db.importJob.update({ where: { id: job.id }, data: { totalRows: rows.length } });
@@ -88,19 +92,32 @@ export async function runValidation(jobId: string) {
   }
 }
 
-export async function confirmImport(actor: Actor, jobId: string, warningReason?: string) {
-  if (actor.role === 'BRANCH_USER') throw forbidden();
-  const job = await prisma.importJob.findUnique({ where: { id: jobId } });
-  if (!job) throw notFound('Import');
-  if (job.status !== 'VALIDATED') throw conflict(`This import is ${job.status.toLowerCase().replace('_', ' ')}; only a validated dry run can be committed.`);
-  const counts = job.counts as Record<string, number>;
-  if ((counts.CREATED ?? 0) + (counts.UPDATED ?? 0) + (counts.WARNING ?? 0) === 0) throw badRequest('Nothing to import: every row is a duplicate or rejected.');
-  if ((counts.WARNING ?? 0) > 0 && !warningReason?.trim()) throw badRequest(`${counts.WARNING} row(s) carry duplicate warnings. Give a reason to accept them.`, [{ field: 'warningReason', message: 'Required' }]);
-  const n = await prisma.importJob.updateMany({ where: { id: jobId, status: 'VALIDATED' }, data: { status: 'COMMIT_QUEUED', warningReason: warningReason ?? null, committedById: actor.id, processedRows: 0 } });
-  if (!n.count) throw conflict('This import has already been confirmed.');
+const IMPORTABLE = ['CREATED', 'UPDATED', 'WARNING'] as const;
+
+/**
+ * Confirms a dry run. Every row is checked again first, then only the rows that are selected, valid
+ * and not removed are queued for import. `expected` is the number of rows the user saw would be
+ * imported: if the final check finds a different number, nothing is queued and the preview shows why.
+ */
+export async function confirmImport(actor: Actor, jobId: string, warningReason?: string, expected?: number) {
+  const r = await tx(async (t) => {
+    const job = await lockForEdit(t, actor, jobId);
+    await recheck(t, job);
+    const live = { jobId, removed: false, selected: true };
+    const [importable, warnings] = await Promise.all([
+      t.importRow.count({ where: { ...live, outcome: { in: [...IMPORTABLE] } } }),
+      t.importRow.count({ where: { ...live, outcome: 'WARNING' } }),
+    ]);
+    if (expected !== undefined && importable !== expected) return { changed: true as const, importable };
+    if (!importable) throw badRequest('Nothing to import: no selected row is valid. Tick the rows to import, or fix the rows that still have problems.');
+    if (warnings > 0 && !warningReason?.trim()) throw badRequest(`${warnings} selected row(s) carry duplicate warnings. Give a reason to accept them.`, [{ field: 'warningReason', message: 'Required' }]);
+    await t.importJob.update({ where: { id: jobId }, data: { status: 'COMMIT_QUEUED', warningReason: warningReason ?? null, committedById: actor.id, processedRows: 0 } });
+    await audit(t, actor, { action: 'IMPORT_CONFIRMED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: { warningReason, rowsToImport: importable } });
+    return { changed: false as const, importable };
+  }, { timeoutMs: 5 * 60_000 });
+  if (r.changed) throw conflict(`The final check changed the result: ${r.importable} selected row(s) can be imported now. Nothing was imported; review the rows and confirm again.`);
   await enqueue('import.commit', { jobId });
-  await audit(prisma, actor, { action: 'IMPORT_CONFIRMED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: { warningReason } });
-  return { ok: true };
+  return { ok: true, rows: r.importable };
 }
 
 export async function cancelImport(actor: Actor, jobId: string) {
@@ -113,7 +130,7 @@ export async function cancelImport(actor: Actor, jobId: string) {
 }
 
 /** Preview cells that can be corrected before confirming. Asset ID is never one: it is assigned on import. */
-export const EDITABLE_ASSET_FIELDS = ['serialnumber', 'make', 'model', 'category', 'legacytag', 'ipaddress', 'hostname', 'macaddress', 'location', 'holderemployeeid', 'purchasedate', 'purchasecost', 'vendor', 'warrantyend', 'condition', 'remarks'] as const;
+export const EDITABLE_ASSET_FIELDS = ['serialnumber', 'make', 'model', 'category', 'legacytag', 'ipaddress', 'hostname', 'macaddress', 'location', 'department', 'holderemployeeid', 'purchasedate', 'purchasecost', 'vendor', 'warrantyend', 'condition', 'remarks'] as const;
 
 /**
  * Re-checks every row of a dry run waiting for confirmation, using the stored (possibly corrected)
@@ -175,6 +192,58 @@ export async function revalidateImport(actor: Actor, jobId: string) {
   return tx(async (t) => ({ counts: await recheck(t, await lockForEdit(t, actor, jobId)) }), { timeoutMs: 5 * 60_000 });
 }
 
+/**
+ * Ticks or unticks rows of the preview (`rows`), or every row still in the batch (`all`).
+ * Only ticked rows are imported; ticking never changes a row's data or its check.
+ */
+export async function setRowSelection(actor: Actor, jobId: string, p: { rows?: number[]; all?: boolean; selected: boolean }) {
+  return tx(async (t) => {
+    await lockForEdit(t, actor, jobId);
+    if (!p.all && !p.rows?.length) throw badRequest('Choose the rows to select.');
+    const n = await t.importRow.updateMany({ where: { jobId, removed: false, ...(p.all ? {} : { rowNumber: { in: p.rows } }) }, data: { selected: p.selected } });
+    return { updated: n.count };
+  });
+}
+
+/**
+ * Removes rows from this import batch (Delete in the preview). Only the uploaded rows are taken out:
+ * nothing in the register, no location and no department is ever deleted here. The rows are kept,
+ * marked removed, so they can be put back; the rest of the batch is checked again without them.
+ */
+export async function removeImportRows(actor: Actor, jobId: string, which: number[] | 'selected', removed = true) {
+  return tx(async (t) => {
+    const job = await lockForEdit(t, actor, jobId);
+    if (job.type !== 'ASSETS') throw badRequest('Only rows of an asset import can be removed in the preview.');
+    const rowNumbers = which === 'selected'
+      ? (await t.importRow.findMany({ where: { jobId, removed: false, selected: true }, select: { rowNumber: true } })).map((r) => r.rowNumber)
+      : which;
+    if (!rowNumbers.length) throw badRequest(which === 'selected' ? 'No row is selected.' : 'Choose the rows to remove.');
+    const n = await t.importRow.updateMany({ where: { jobId, rowNumber: { in: rowNumbers }, removed: !removed }, data: { removed, ...(removed ? {} : { selected: true }) } });
+    if (!n.count) return { updated: 0, counts: job.counts };
+    const counts = await recheck(t, job);
+    await audit(t, actor, { action: removed ? 'IMPORT_ROWS_REMOVED' : 'IMPORT_ROWS_RESTORED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: { rows: rowNumbers } });
+    return { updated: n.count, counts };
+  }, { timeoutMs: 5 * 60_000 });
+}
+
+/**
+ * After a location or department was added from the preview under a different name than the file
+ * used, points every row with the old value at the new one, then checks the batch again.
+ */
+export async function replaceImportValue(actor: Actor, jobId: string, p: { field: 'location' | 'department'; from: string; to: string }) {
+  return tx(async (t) => {
+    const job = await lockForEdit(t, actor, jobId);
+    if (job.type !== 'ASSETS') throw badRequest('Only asset imports can be corrected in the preview.');
+    const from = p.from.trim().toLowerCase();
+    const rows = await t.importRow.findMany({ where: { jobId, removed: false }, select: { id: true, rowNumber: true, data: true } });
+    const hit = rows.filter((r) => String((r.data as Record<string, string>)[p.field] ?? '').trim().toLowerCase() === from);
+    for (const r of hit) await t.importRow.update({ where: { id: r.id }, data: { data: { ...(r.data as Record<string, string>), [p.field]: p.to.trim() } } });
+    const counts = await recheck(t, job);
+    if (hit.length) await audit(t, actor, { action: 'IMPORT_ROW_EDITED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, before: { [p.field]: p.from }, after: { [p.field]: p.to }, details: { rows: hit.map((r) => r.rowNumber) } });
+    return { updated: hit.length, counts };
+  }, { timeoutMs: 5 * 60_000 });
+}
+
 /** Worker step 2: re-validate against the current database, then apply atomically. */
 export async function runCommit(jobId: string) {
   const job = await prisma.importJob.findUnique({ where: { id: jobId } });
@@ -182,8 +251,12 @@ export async function runCommit(jobId: string) {
   await prisma.importJob.update({ where: { id: jobId }, data: { status: 'COMMITTING', processedRows: 0 } });
   const actor = await actorForUser(prisma, job.committedById ?? job.createdById);
   try {
-    const v = await validate(job);
-    const stored = new Map((await prisma.importRow.findMany({ where: { jobId }, select: { rowNumber: true, outcome: true } })).map((r) => [r.rowNumber, r.outcome]));
+    const all = await validate(job);
+    const storedRows = await prisma.importRow.findMany({ where: { jobId, removed: false }, select: { rowNumber: true, outcome: true, selected: true } });
+    const stored = new Map(storedRows.map((r) => [r.rowNumber, r.outcome]));
+    // Only the rows ticked in the preview are imported; the others stay in the report as they are.
+    const picked = new Set(storedRows.filter((r) => r.selected).map((r) => r.rowNumber));
+    const v = { ...all, rows: all.rows.filter((r) => picked.has(r.rowNumber)) };
     const drift = v.rows.filter((r) => stored.get(r.rowNumber) !== r.outcome);
     if (drift.length) {
       const msg = `The data changed since the dry run, so nothing was applied. ${drift.length} row(s) now have a different result (e.g. row ${drift[0].rowNumber}: was ${stored.get(drift[0].rowNumber)}, now ${drift[0].outcome} — ${drift[0].messages.join(' ')}). Upload the file again to re-run the dry run.`;
@@ -201,11 +274,13 @@ export async function runCommit(jobId: string) {
       return r.results;
     }, { timeoutMs: 15 * 60_000 });
     for (const r of results) await prisma.importRow.update({ where: { jobId_rowNumber: { jobId, rowNumber: r.rowNumber } }, data: { resultId: r.resultId, resultCode: r.resultCode } });
-    const counts = countOutcomes(v.rows);
+    // Counts of what was done: importable rows that were not ticked are counted apart, not as created.
+    const skipped = all.rows.filter((r) => !picked.has(r.rowNumber) && (IMPORTABLE as readonly string[]).includes(r.outcome));
+    const counts: Record<string, number> = { ...countOutcomes(all.rows.filter((r) => !skipped.includes(r))), total: all.rows.length, NOT_SELECTED: skipped.length };
     await prisma.importJob.update({ where: { id: jobId }, data: { status: 'COMMITTED', committedAt: new Date(), processedRows: v.rows.length, counts } });
     if (afterCommit) await (afterCommit as () => Promise<void>)();
     await audit(prisma, actor, { action: 'IMPORT_COMMITTED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: { type: job.type, mode: job.mode, ...counts, locationsCreated: job.locationsToCreate } });
-    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Import committed: ${job.fileName}`, body: `${counts.CREATED} created, ${counts.UPDATED} updated, ${counts.WARNING} with warnings, ${counts.UNCHANGED} duplicate, ${counts.REJECTED} rejected.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:committed` });
+    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Import committed: ${job.fileName}`, body: `${counts.CREATED} created, ${counts.UPDATED} updated, ${counts.WARNING} with warnings, ${counts.UNCHANGED} duplicate, ${counts.REJECTED} rejected${counts.NOT_SELECTED ? `, ${counts.NOT_SELECTED} not selected` : ""}.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:committed` });
   } catch (e) {
     const msg = e instanceof AppError ? e.message : `Commit failed and was rolled back: ${(e as Error).message}`;
     console.error('[import] commit failed', e);
@@ -227,12 +302,51 @@ export async function getImport(actor: Actor, id: string) {
   if (actor.role === 'BRANCH_USER') throw forbidden();
   const job = await prisma.importJob.findUnique({ where: { id }, omit: { storageKey: true } });
   if (!job) throw notFound('Import');
-  return job;
+  return job.type === 'ASSETS' && job.validatedAt ? { ...job, preview: await previewSummary(id) } : job;
+}
+
+/**
+ * What the Excel Upload preview needs beyond the outcome counts: how many rows are ticked and would
+ * be imported, how many were removed, each row status, and every location and department the file
+ * names that does not exist yet (with how many rows wait for it).
+ */
+async function previewSummary(jobId: string) {
+  const rows = await prisma.importRow.findMany({ where: { jobId }, select: { rowNumber: true, outcome: true, messages: true, selected: true, removed: true } });
+  const statuses: Record<string, number> = {};
+  const missing = { locations: new Map<string, { value: string; rows: number }>(), departments: new Map<string, { value: string; rows: number }>() };
+  let selected = 0, importable = 0, removed = 0, warnings = 0, total = 0, selectedProblems = 0;
+  for (const r of rows) {
+    if (r.removed) { removed++; continue; }
+    total++;
+    const st = importRowStatus(r.outcome, r.messages);
+    statuses[st] = (statuses[st] ?? 0) + 1;
+    if (r.selected) { selected++; if ((IMPORTABLE as readonly string[]).includes(r.outcome)) importable++; if (r.outcome === 'WARNING') warnings++; if (r.outcome === 'REJECTED') selectedProblems++; }
+    for (const m of r.messages) {
+      const into = LOCATION_MISSING.test(m) ? missing.locations : DEPARTMENT_MISSING.test(m) ? missing.departments : null;
+      if (!into) continue;
+      const v = missingValue(m);
+      const e = into.get(v.toLowerCase()) ?? { value: v, rows: 0 };
+      e.rows++;
+      into.set(v.toLowerCase(), e);
+    }
+  }
+  return { total, selected, importable, removed, warnings, selectedProblems, statuses, missingLocations: [...missing.locations.values()], missingDepartments: [...missing.departments.values()] };
+}
+
+/** Row numbers of the batch whose status is one of these (statuses depend on the messages, so they are worked out here). */
+async function rowsWithStatus(jobId: string, statuses: ImportRowStatus[]) {
+  const rows = await prisma.importRow.findMany({ where: { jobId, removed: false }, select: { rowNumber: true, outcome: true, messages: true } });
+  return rows.filter((r) => statuses.includes(importRowStatus(r.outcome, r.messages))).map((r) => r.rowNumber);
 }
 
 export async function importRows(actor: Actor, id: string, p: { outcome?: string; skip: number; take: number }) {
   const job = await getImport(actor, id);
-  const where: Prisma.ImportRowWhereInput = { jobId: id, ...(p.outcome ? { outcome: p.outcome as RowResult<unknown>['outcome'] } : {}) };
+  // `outcome` is a preview tab (Valid, Missing location, Removed…) or, as before, a stored outcome.
+  const tab = ROW_FILTERS.find((f) => f.value === p.outcome);
+  const where: Prisma.ImportRowWhereInput = { jobId: id };
+  if (job.type === 'ASSETS') where.removed = p.outcome === 'REMOVED';
+  if (tab?.statuses) where.rowNumber = { in: await rowsWithStatus(id, tab.statuses) };
+  else if (p.outcome && p.outcome !== 'REMOVED') where.outcome = p.outcome as RowResult<unknown>['outcome'];
   const [rows, total] = await Promise.all([prisma.importRow.findMany({ where, orderBy: { rowNumber: 'asc' }, skip: p.skip, take: p.take }), prisma.importRow.count({ where })]);
   if (job.type !== 'ASSETS') return { rows, total };
   return { rows: await withAssetView(rows), total };
@@ -279,9 +393,9 @@ export async function importReportCsv(actor: Actor, id: string) {
   if (job.reportPurgedAt) throw conflict(`The row report for ${job.fileName} was removed on ${job.reportPurgedAt.toISOString().slice(0, 10)} under the import retention setting. The import log entry and its counts remain.`);
   const rows = await prisma.importRow.findMany({ where: { jobId: id }, orderBy: { rowNumber: 'asc' } });
   const cols = COLUMNS[job.type].map((c) => c.key);
-  const header = ['Row', 'Outcome', 'Reason', 'Result ID', ...COLUMNS[job.type].map((c) => c.header)];
+  const header = ['Row', 'Outcome', 'Selected', 'Reason', 'Result ID', ...COLUMNS[job.type].map((c) => c.header)];
   const outcomeLabel = (o: string) => ({ CREATED: 'New', UPDATED: 'Existing', UNCHANGED: 'Duplicate', WARNING: 'Possible duplicate', REJECTED: 'Invalid' } as Record<string, string>)[o] ?? o;
-  const lines = rows.map((r) => [r.rowNumber, outcomeLabel(r.outcome), r.messages.join(' | '), r.resultCode ?? '', ...cols.map((k) => (r.data as Record<string, string>)[k] ?? '')]);
+  const lines = rows.map((r) => [r.rowNumber, r.removed ? 'Removed from the import' : outcomeLabel(r.outcome), r.removed ? '' : r.selected ? 'Yes' : 'No', r.messages.join(' | '), r.resultCode ?? '', ...cols.map((k) => (r.data as Record<string, string>)[k] ?? '')]);
   await audit(prisma, actor, { action: 'EXPORT', entityType: 'Import', entityId: id, entityLabel: `${job.fileName} result report`, details: { rows: rows.length, format: 'csv' } });
   return { data: Buffer.from('﻿' + stringify([header, ...lines])), name: `${job.fileName.replace(/\.[^.]+$/, '')}-result.csv` };
 }

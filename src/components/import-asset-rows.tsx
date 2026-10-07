@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseDate } from '@/lib/parse-date';
+import { DEPARTMENT_MISSING, importRowStatus, LOCATION_MISSING, ROW_STATUS_LABEL, ROW_STATUS_TONE } from '@/lib/import-row-status';
 import { api, qs } from './api';
 import { AssetStatus } from './badges';
 import { Dash, HolderCell, LocationCell, WarrantyCell } from './asset-list-parts';
@@ -10,6 +11,8 @@ import { Badge, clsx } from './ui';
 
 export interface ImportAssetRow {
   id: string; rowNumber: number; data: Record<string, string>; outcome: string; messages: string[]; resultCode: string | null;
+  /** Ticked in the preview (only ticked, valid rows are imported) / taken out of this import batch. */
+  selected?: boolean; removed?: boolean;
   view?: { holderName: string | null; asset: { id: string; assetCode: string; status: string } | null; duplicate?: ImportDuplicate | null };
 }
 
@@ -44,7 +47,22 @@ export interface RowEditor {
   /** Opens the camera for this row's serial. */
   scan: (r: ImportAssetRow) => void;
   more: () => void;
-  categories: string[]; locations: string[];
+  categories: string[]; locations: string[]; departments: string[];
+}
+
+/**
+ * Choosing rows, removing them from the batch, and adding missing master data from the preview.
+ * Removing a row only takes the uploaded row out of this import; nothing in the register changes.
+ */
+export interface PreviewActions {
+  allSelected: boolean; someSelected: boolean; busy: boolean;
+  toggleAll: () => void; toggle: (r: ImportAssetRow) => void;
+  remove: (r: ImportAssetRow) => void; restore: (r: ImportAssetRow) => void;
+  /** What to add for a location the file names: the first missing part of its path, and whether more remains after it. */
+  locationPlan: (value: string) => { name: string; parentPath: string | null; more: boolean };
+  addLocation: (value: string) => void; addDepartment: (value: string) => void;
+  /** Only Administrators can add locations; IT operators are told to ask one. */
+  canAddLocation: boolean;
 }
 
 const g = (r: ImportAssetRow, k: string) => (r.data[k] ?? '').trim();
@@ -63,7 +81,8 @@ function matchLocation(options: string[], v: string) {
 const FIELD_OF: [RegExp, string][] = [
   [/^Category is required|^Unknown category|^Category ".*" is inactive/, 'category'],
   [/^Make is required/, 'make'], [/^Model is required/, 'model'],
-  [/^Location is required|^Unknown location|^Location ".*" matches more than one/, 'location'],
+  [/^Location is required|^Unknown location|^Location not found|^Location ".*" (matches more than one|is inactive)/, 'location'],
+  [/^Department not found|^Department ".*" is inactive/, 'department'],
   [/^Serial |^Duplicate: serial /, 'serialnumber'],
   [/^Legacy tag |^Duplicate: legacy tag /, 'legacytag'],
   [/^IP address |^Duplicate IP |IP "/, 'ipaddress'],
@@ -73,9 +92,10 @@ const FIELD_OF: [RegExp, string][] = [
 ];
 const fieldOf = (m: string) => FIELD_OF.find(([re]) => re.test(m))?.[1] ?? null;
 /** Cells that show their own problems; others (MAC, purchase date, cost) stay in the Row column. */
-const CELL_FIELDS = new Set(['category', 'make', 'model', 'location', 'serialnumber', 'legacytag', 'ipaddress', 'hostname', 'holderemployeeid', 'warrantyend']);
+const CELL_FIELDS = new Set(['category', 'make', 'model', 'location', 'department', 'serialnumber', 'legacytag', 'ipaddress', 'hostname', 'holderemployeeid', 'warrantyend']);
 const isProblem = (r: ImportAssetRow) => r.outcome === 'REJECTED' || r.outcome === 'WARNING';
-const issuesFor = (r: ImportAssetRow, k: string) => (isProblem(r) ? r.messages.filter((m) => fieldOf(m) === k) : []);
+// "Not found" is shown by the location and department cells themselves, next to their Add button.
+const issuesFor = (r: ImportAssetRow, k: string) => (isProblem(r) ? r.messages.filter((m) => fieldOf(m) === k && !LOCATION_MISSING.test(m) && !DEPARTMENT_MISSING.test(m)) : []);
 
 /** Why the row's serial cannot be imported, in the words Bulk add uses. */
 function serialProblem(r: ImportAssetRow): ReactNode {
@@ -116,7 +136,7 @@ function EmployeeCodeInput({ value, onChange, autoFocus }: { value: string; onCh
  * and after it is imported. Asset ID is left out: it is assigned when the row is imported.
  * With an editor (a dry run waiting for confirmation) every cell can be corrected in place.
  */
-export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
+export function importAssetColumns(ed?: RowEditor, pa?: PreviewActions): Column<ImportAssetRow>[] {
   const editing = (r: ImportAssetRow) => !!ed && ed.editing === r.rowNumber;
 
   /** A cell: its value, any problem with it underneath, and (while editable) click to edit. */
@@ -135,7 +155,8 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
         {issues.map((m) => <span key={m} className={clsx('mt-1 block min-w-[9rem] max-w-[14rem] text-[11px]', bad ? 'text-red-700' : 'text-amber-800')}>{m}</span>)}
       </>
     );
-    if (!ed || ed.editing !== null) return <span className="block">{body}</span>;
+    // Rows removed from the batch are read-only until they are put back.
+    if (!ed || ed.editing !== null || r.removed) return <span className="block">{body}</span>;
     return (
       <span role="button" tabIndex={0} title="Click to edit" className="-m-1 block cursor-text rounded p-1 hover:bg-brand-50 hover:ring-1 hover:ring-brand-200"
         onClick={(e) => { if (!(e.target as HTMLElement).closest('a,button')) ed.start(r, k); }} onKeyDown={(e) => { if (e.key === 'Enter') ed.start(r, k); }}>
@@ -158,11 +179,16 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
       // Problems that belong to a visible cell are shown on that cell instead.
       // A duplicate is explained by the field that matched and the existing asset, not the raw message.
       const dup = r.outcome === 'UNCHANGED' ? r.view?.duplicate : null;
-      const notes = r.outcome === 'CREATED' || dup ? [] : r.messages.filter((m) => !(isProblem(r) && CELL_FIELDS.has(fieldOf(m) ?? '')));
+      const notes = r.outcome === 'CREATED' || dup || r.removed ? [] : r.messages.filter((m) => !(isProblem(r) && CELL_FIELDS.has(fieldOf(m) ?? '')));
+      const st = importRowStatus(r.outcome, r.messages);
+      const importable = ['CREATED', 'UPDATED', 'WARNING'].includes(r.outcome);
+      const action = r.removed ? 'Not imported (removed)' : importable && r.selected === false ? (pa ? 'Skip (not selected)' : 'Not imported (not selected)') : OUT_ACTION[r.outcome];
       return (
         <span className="flex flex-col items-start gap-1">
-          <span className="flex items-center gap-2"><span className="text-slate-500">{r.rowNumber}</span><Badge tone={OUT_TONE[r.outcome]}>{OUT_LABEL[r.outcome]}</Badge></span>
-          <span className="text-[11px] text-slate-500">Action: <b className="font-medium text-slate-700">{OUT_ACTION[r.outcome]}</b></span>
+          <span className="flex items-center gap-2"><span className="text-slate-500">{r.rowNumber}</span>
+            {r.removed ? <Badge tone="gray">Removed</Badge> : <Badge tone={ROW_STATUS_TONE[st]}>{ROW_STATUS_LABEL[st]}</Badge>}
+          </span>
+          <span className="text-[11px] text-slate-500">Action: <b className="font-medium text-slate-700">{action}</b></span>
           {dup && <DuplicateNote d={dup} />}
           {notes.length > 0 && <span className={`block w-52 text-xs ${r.outcome === 'REJECTED' ? 'text-red-800' : r.outcome === 'WARNING' ? 'text-amber-800' : 'text-slate-600'}`}>{notes.join(' ')}</span>}
         </span>
@@ -185,7 +211,7 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
         return (
           <span className="block min-w-[10rem]">
             <span className={clsx('text-xs font-medium', required ? 'text-red-700' : 'text-amber-700')}>{required ? 'Missing: serial number is required' : 'Missing'}</span>
-            {ed && ed.editing === null && (
+            {ed && ed.editing === null && !r.removed && (
               <span className="mt-1 flex gap-1">
                 <button type="button" className="btn btn-sm" onClick={() => ed.scan(r)}>Scan</button>
                 <button type="button" className="btn btn-sm" onClick={() => ed.start(r, 'serialnumber')}>Enter manually</button>
@@ -204,19 +230,48 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
     { key: 'make', header: 'Make', className: 'align-top', render: (r) => cell(r, 'make', <span className="whitespace-nowrap text-slate-600">{g(r, 'make') || <Dash />}</span>) },
     { key: 'model', header: 'Model', className: 'align-top', render: (r) => cell(r, 'model', <span className="block min-w-[6.5rem] font-medium text-slate-900">{g(r, 'model') || <Dash />}</span>) },
     { key: 'category', header: 'Category', className: 'align-top', render: (r) => cell(r, 'category', <span className="whitespace-nowrap">{g(r, 'category') || <Dash />}</span>, ed && choose(ed.categories, 'Choose a category', 'w-36')) },
+    { key: 'location', header: 'Location', className: 'align-top', render: (r) => {
+      const v = g(r, 'location');
+      const missing = !r.removed && r.messages.some((m) => LOCATION_MISSING.test(m));
+      const plan = missing && pa ? pa.locationPlan(v) : null;
+      const view = !missing ? <LocationCell path={locPath(v)} /> : (
+        <span className="block w-44">
+          <span className="rounded bg-amber-50 px-1 ring-1 ring-amber-300">{locPath(v)}</span>
+          <span className="mt-1 block text-[11px] font-medium text-amber-800">Location not found</span>
+          {plan?.more && <span className="block text-[11px] text-amber-800">“{plan.name}” does not exist either, so add it first.</span>}
+          {pa && ed?.editing == null && (pa.canAddLocation
+            ? <button type="button" className="btn btn-sm mt-1" disabled={pa.busy} onClick={() => pa.addLocation(v)}>{plan?.more ? `Add ${plan.name} first` : 'Add location'}</button>
+            : <span className="mt-1 block text-[11px] text-slate-500">Ask an Administrator to add it, or choose another location.</span>)}
+        </span>
+      );
+      return cell(r, 'location', view, ed && ((x, set, af) => choose(ed.locations, 'Choose a location', 'w-56')(matchLocation(ed.locations, x), set, af)));
+    } },
+    { key: 'department', header: 'Department', className: 'align-top', render: (r) => {
+      const v = g(r, 'department');
+      const missing = !r.removed && r.messages.some((m) => DEPARTMENT_MISSING.test(m));
+      const view = !missing ? <span className="whitespace-nowrap">{v || <Dash />}</span> : (
+        <span className="block min-w-[8rem]">
+          <span className="rounded bg-amber-50 px-1 ring-1 ring-amber-300">{v}</span>
+          <span className="mt-1 block text-[11px] font-medium text-amber-800">Department not found</span>
+          {pa && ed?.editing == null && <button type="button" className="btn btn-sm mt-1" disabled={pa.busy} onClick={() => pa.addDepartment(v)}>Add department</button>}
+        </span>
+      );
+      return cell(r, 'department', view, ed && choose(ed.departments, 'No department', 'w-40'));
+    } },
     { key: 'legacyTag', header: 'Legacy tag', className: 'align-top', render: (r) => cell(r, 'legacytag', <span className="whitespace-nowrap text-xs">{g(r, 'legacytag') || <Dash />}</span>) },
     { key: 'ipAddress', header: 'IP address', className: 'align-top', render: (r) => cell(r, 'ipaddress', <span className="whitespace-nowrap font-mono text-xs">{g(r, 'ipaddress') || <Dash />}</span>) },
     { key: 'hostname', header: 'Hostname', className: 'align-top', render: (r) => cell(r, 'hostname', <span className="whitespace-nowrap">{g(r, 'hostname') || <Dash />}</span>) },
-    { key: 'location', header: 'Location', className: 'align-top', render: (r) => cell(r, 'location', <LocationCell path={locPath(g(r, 'location'))} />, ed && ((v, set, af) => choose(ed.locations, 'Choose a location', 'w-56')(matchLocation(ed.locations, v), set, af))) },
     { key: 'holder', header: 'Assigned to', className: 'align-top', render: (r) => {
       const code = g(r, 'holderemployeeid');
-      const view = !code ? <HolderCell type={null} holder={null} /> : <HolderCell type="EMPLOYEE" holder={r.view?.holderName ? `${r.view.holderName} (${code})` : code} />;
+      // With no employee, a department in the file holds the asset.
+      const dept = !code && g(r, 'department') && !r.messages.some((m) => fieldOf(m) === 'department') ? g(r, 'department') : null;
+      const view = !code ? <HolderCell type={dept ? 'DEPARTMENT' : null} holder={dept} /> : <HolderCell type="EMPLOYEE" holder={r.view?.holderName ? `${r.view.holderName} (${code})` : code} />;
       return cell(r, 'holderemployeeid', view, (v, set, af) => <EmployeeCodeInput value={v} onChange={set} autoFocus={af} />);
     } },
     { key: 'status', header: 'Status', className: 'align-top', render: (r) => {
       if (r.view?.asset) return <AssetStatus s={r.view.asset.status} />;
       if (r.outcome === 'REJECTED') return <Dash />;
-      return <AssetStatus s={g(r, 'holderemployeeid') ? 'ASSIGNED' : 'IN_STOCK'} />;
+      return <AssetStatus s={g(r, 'holderemployeeid') || g(r, 'department') ? 'ASSIGNED' : 'IN_STOCK'} />;
     } },
     { key: 'warrantyEnd', header: 'Warranty end', className: 'align-top', render: (r) => {
       const raw = g(r, 'warrantyend');
@@ -225,14 +280,32 @@ export function importAssetColumns(ed?: RowEditor): Column<ImportAssetRow>[] {
         (v, set, af) => <input type="date" className="input w-36 py-1 text-xs" value={parseDate(v) ?? ''} onChange={(e) => set(e.target.value)} autoFocus={af} />);
     } },
   ];
-  if (ed) cols.push({ key: 'action', header: 'Action', className: 'sticky right-0 z-[1] bg-white align-top shadow-[-1px_0_0_#e2e8f0]', render: (r) => editing(r) ? (
+  if (ed) cols.push({ key: 'action', header: 'Actions', className: 'sticky right-0 z-[1] bg-white align-top shadow-[-1px_0_0_#e2e8f0]', render: (r) => r.removed ? (
+    pa && <button type="button" className="btn btn-sm" disabled={pa.busy} onClick={() => pa.restore(r)}>Put back</button>
+  ) : editing(r) ? (
     <span className="flex flex-col gap-1">
       <button type="button" className="btn btn-primary btn-sm" disabled={ed.saving} onClick={ed.save}>{ed.saving ? 'Checking…' : 'Save'}</button>
       <button type="button" className="btn btn-sm" disabled={ed.saving} onClick={ed.more}>More fields</button>
       <button type="button" className="btn btn-ghost btn-sm" disabled={ed.saving} onClick={ed.cancel}>Cancel</button>
     </span>
-  ) : <button type="button" className="btn btn-sm" disabled={ed.editing !== null} onClick={() => ed.start(r)}>Edit</button> });
+  ) : (
+    <span className="flex flex-col gap-1">
+      <button type="button" className="btn btn-sm" disabled={ed.editing !== null} onClick={() => ed.start(r)}>Edit</button>
+      {pa && <button type="button" className="btn btn-ghost btn-sm text-red-700" disabled={ed.editing !== null || pa.busy} onClick={() => pa.remove(r)}>Delete</button>}
+    </span>
+  ) });
+  // The tick box comes first: only ticked, valid rows are imported. Rows removed from the batch have none.
+  if (pa) cols.unshift({ key: 'select', header: <SelectAllBox all={pa.allSelected} some={pa.someSelected} disabled={pa.busy} onChange={pa.toggleAll} />, className: 'w-8 align-top', render: (r) => r.removed ? null : (
+    <input type="checkbox" aria-label={`Select row ${r.rowNumber}`} checked={!!r.selected} disabled={pa.busy} onChange={() => pa.toggle(r)} />
+  ) });
   return cols;
+}
+
+/** Header tick box: ticks every row of the batch, or unticks them all; shows a dash when only some are ticked. */
+function SelectAllBox({ all, some, disabled, onChange }: { all: boolean; some: boolean; disabled: boolean; onChange: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = some && !all; }, [all, some]);
+  return <input ref={ref} type="checkbox" aria-label={all ? 'Deselect all rows' : 'Select all rows'} title={all ? 'Deselect all' : 'Select all'} checked={all} disabled={disabled} onChange={onChange} />;
 }
 
 /** "Duplicate field: Serial number · Uploaded value · Existing asset AST-… (Dell Latitude, serial …)". */

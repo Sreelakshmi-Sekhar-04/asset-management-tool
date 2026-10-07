@@ -19,6 +19,11 @@ export class LocationResolver {
     this.all = await this.db.location.findMany();
     this.byPath = new Map(this.all.map((l) => [l.namePath.toLowerCase(), l]));
   }
+  /** The path names a location that exists but is inactive (so it must not be offered for creation). */
+  isInactive(raw: string) {
+    const key = LocationResolver.norm(raw).toLowerCase();
+    return this.all.some((l) => !l.active && (l.namePath.toLowerCase() === key || l.namePath.toLowerCase().endsWith(' / ' + key)));
+  }
   static norm(p: string) {
     return p.split(/[/\\>]/).map((s) => s.trim()).filter(Boolean).join(' / ');
   }

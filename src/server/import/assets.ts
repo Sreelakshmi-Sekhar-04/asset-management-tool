@@ -19,6 +19,8 @@ const UPDATABLE = ['categoryId', 'make', 'model', 'hostname', 'ipAddress', 'macA
 export interface AssetPlan {
   categoryId: string; make: string; model: string; serialNumber: string | null; hostname: string | null; ipAddress: string | null;
   macAddress: string | null; legacyTag: string | null; locationPath: string; locationId: string | null; holderEmployeeId: string | null;
+  /** Holds the asset when the row names a department and no employee. */
+  holderDepartmentId: string | null;
   purchaseDate: string | null; purchaseCost: number | null; vendor: string | null; warrantyEnd: string | null; condition: string | null; remarks: string | null;
   fingerprint: string; warnings: { key: string; value: string; matchId: string; matchCode: string }[]; changes?: Record<string, unknown>;
 }
@@ -31,6 +33,7 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
   const catByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
   const employees = await db.employee.findMany({ select: { id: true, employeeCode: true, active: true, name: true } });
   const empByCode = new Map(employees.map((e) => [e.employeeCode.toLowerCase(), e]));
+  const deptByName = new Map((await db.department.findMany({ select: { id: true, name: true, active: true } })).map((x) => [x.name.toLowerCase(), x]));
   const existing = (await db.asset.findMany({
     select: { id: true, assetCode: true, status: true, serialNormalized: true, legacyTagNormalized: true, hostnameNormalized: true, ipAddress: true, importFingerprint: true, categoryId: true, make: true, model: true, hostname: true, macAddress: true, legacyTag: true, serialNumber: true, purchaseDate: true, purchaseCost: true, vendor: true, warrantyEnd: true, condition: true, remarks: true, locationId: true, holderEmployeeId: true },
   })) as unknown as Existing[];
@@ -72,7 +75,8 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
     let cost: number | null = null;
     if (g('purchasecost')) { cost = Number(g('purchasecost').replace(/[,₹\s]/g, '')); if (isNaN(cost) || cost < 0) { msgs.push(`Purchase cost "${g('purchasecost')}" is not a valid amount.`); cost = null; } }
     const loc = g('location') ? locs.resolve(g('location')) : null;
-    if (g('location') && loc?.kind === 'unknown') msgs.push(`Unknown location "${g('location')}". Tick "create missing locations" to create it.`);
+    // A missing location is never created by the dry run: the preview offers "Add location" for it.
+    if (g('location') && loc?.kind === 'unknown') msgs.push(locs.isInactive(g('location')) ? `Location "${g('location')}" is inactive.` : `Location not found: "${g('location')}".`);
     if (g('location') && loc?.kind === 'ambiguous') msgs.push(`Location "${g('location')}" matches more than one node; give the full path.`);
     const holderCode = g('holderemployeeid');
     let holderId: string | null = null;
@@ -82,6 +86,14 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
       else if (!e.active) msgs.push(`Employee ${holderCode} is inactive and cannot hold assets.`);
       else holderId = e.id;
     }
+    const deptName = g('department');
+    let deptId: string | null = null;
+    if (deptName) {
+      const x = deptByName.get(deptName.toLowerCase());
+      if (!x) msgs.push(`Department not found: "${deptName}".`);
+      else if (!x.active) msgs.push(`Department "${x.name}" is inactive.`);
+      else deptId = x.id;
+    }
     const tag = g('legacytag') || null;
     const host = g('hostname') || null;
     // Within-file duplicates
@@ -89,10 +101,13 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
     if (tag) { const k = tag.toLowerCase(); if (fileTag.has(k)) msgs.push(`Legacy tag "${tag}" is duplicated within the file (rows ${fileTag.get(k)} and ${r.rowNumber}).`); else fileTag.set(k, r.rowNumber); }
     const plan: AssetPlan = {
       categoryId: cat?.id ?? '', make: g('make'), model: g('model'), serialNumber: serial, hostname: host, ipAddress: ip, macAddress: mac, legacyTag: tag,
-      locationPath: g('location'), locationId: loc?.kind === 'found' ? loc.id : null, holderEmployeeId: holderId, purchaseDate: pd, purchaseCost: cost,
+      locationPath: g('location'), locationId: loc?.kind === 'found' ? loc.id : null, holderEmployeeId: holderId,
+      holderDepartmentId: holderId ? null : deptId, purchaseDate: pd, purchaseCost: cost,
       vendor: g('vendor') || null, warrantyEnd: we, condition: g('condition') || null, remarks: g('remarks') || null, fingerprint: '', warnings: [],
     };
-    const base = crypto.createHash('sha256').update(JSON.stringify([plan.categoryId, plan.make.toLowerCase(), plan.model.toLowerCase(), serial?.toLowerCase(), host?.toLowerCase(), ip, mac?.toLowerCase(), tag?.toLowerCase(), plan.locationPath.toLowerCase(), holderCode.toLowerCase(), pd, cost, plan.vendor, we, plan.condition, plan.remarks])).digest('hex').slice(0, 40);
+    const base = crypto.createHash('sha256').update(JSON.stringify([plan.categoryId, plan.make.toLowerCase(), plan.model.toLowerCase(), serial?.toLowerCase(), host?.toLowerCase(), ip, mac?.toLowerCase(), tag?.toLowerCase(), plan.locationPath.toLowerCase(), holderCode.toLowerCase(), pd, cost, plan.vendor, we, plan.condition, plan.remarks,
+      // Only when given, so files without a Department column keep the fingerprints of earlier imports.
+      ...(deptName ? [deptName.toLowerCase()] : [])])).digest('hex').slice(0, 40);
     const occ = (fpCount.get(base) ?? 0) + 1;
     fpCount.set(base, occ);
     plan.fingerprint = `${base}#${occ}`;
@@ -142,7 +157,7 @@ export async function validateAssets(db: Db, ctx: ImportContext, rows: ParsedRow
     plan.warnings = w.warnings;
     const withinFileWarn = w.messages.length > w.warnings.length;
     const locNote = loc?.kind === 'create' ? [`Location "${loc.path}" will be created.`] : [];
-    results.push({ rowNumber: r.rowNumber, data: d, outcome: w.warnings.length || withinFileWarn ? 'WARNING' : 'CREATED', messages: [...w.messages, ...locNote, ...(holderId ? [`Will be assigned to employee ${holderCode}.`] : [])], plan });
+    results.push({ rowNumber: r.rowNumber, data: d, outcome: w.warnings.length || withinFileWarn ? 'WARNING' : 'CREATED', messages: [...w.messages, ...locNote, ...(holderId ? [`Will be assigned to employee ${holderCode}.`] : plan.holderDepartmentId ? [`Will be assigned to department ${deptName}.`] : [])], plan });
     await tick(i);
     void warn;
   }
@@ -171,6 +186,7 @@ export async function applyAssets(t: Db, actor: Actor, jobId: string, v: Validat
   const created = await locIds.createAll(actor, v.locationsToCreate);
   const locationName = new Map((await t.location.findMany({ select: { id: true, namePath: true } })).map((l) => [l.id, l.namePath]));
   const empName = new Map((await t.employee.findMany({ select: { id: true, name: true, employeeCode: true } })).map((e) => [e.id, `${e.name} (${e.employeeCode})`]));
+  const deptName = new Map((await t.department.findMany({ select: { id: true, name: true } })).map((x) => [x.id, x.name]));
   const results: { rowNumber: number; resultId: string | null; resultCode: string | null }[] = [];
   const toCreate = v.rows.filter((r) => r.outcome === 'CREATED' || (r.outcome === 'WARNING' && !r.matchedId));
   const toUpdate = v.rows.filter((r) => r.outcome === 'UPDATED' || (r.outcome === 'WARNING' && r.matchedId));
@@ -188,7 +204,8 @@ export async function applyAssets(t: Db, actor: Actor, jobId: string, v: Validat
         id: crypto.randomUUID(), categoryId: p.categoryId, make: p.make, model: p.model, serialNumber: p.serialNumber, hostname: p.hostname, ipAddress: p.ipAddress,
         macAddress: p.macAddress, legacyTag: p.legacyTag, purchaseDate: p.purchaseDate ? dateOnly(p.purchaseDate) : null, purchaseCost: p.purchaseCost,
         vendor: p.vendor, warrantyEnd: p.warrantyEnd ? dateOnly(p.warrantyEnd) : null, condition: p.condition, remarks: p.remarks, locationId,
-        status: p.holderEmployeeId ? 'ASSIGNED' : 'IN_STOCK', holderType: p.holderEmployeeId ? 'EMPLOYEE' : null, holderEmployeeId: p.holderEmployeeId,
+        status: p.holderEmployeeId || p.holderDepartmentId ? 'ASSIGNED' : 'IN_STOCK', holderType: p.holderEmployeeId ? 'EMPLOYEE' : p.holderDepartmentId ? 'DEPARTMENT' : null,
+        holderEmployeeId: p.holderEmployeeId, holderDepartmentId: p.holderDepartmentId ?? null,
         origin: 'import', fieldSources: fs, importFingerprint: p.serialNumber || p.legacyTag ? null : p.fingerprint,
         flagDuplicateSuspect: p.warnings.length > 0, createdById: actorId, updatedById: actorId,
       };
@@ -206,6 +223,10 @@ export async function applyAssets(t: Db, actor: Actor, jobId: string, v: Validat
         const hn = empName.get(a.holderEmployeeId) ?? a.holderEmployeeId;
         movements.push({ assetId: a.id!, kind: 'ASSIGNED', fromLocationId: a.locationId, fromLocationName: ln, toLocationId: a.locationId, toLocationName: ln, fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', toHolderType: 'EMPLOYEE', toHolderId: a.holderEmployeeId, toHolderName: hn, effectiveAt: new Date(now.getTime() + 1), actorId, actorName: actor.name, reason: 'Imported' });
         assignments.push({ assetId: a.id!, holderType: 'EMPLOYEE', holderId: a.holderEmployeeId, holderName: hn, startAt: now, assignedById: actorId, source: 'IMPORT' });
+      } else if (a.holderDepartmentId) {
+        const hn = deptName.get(a.holderDepartmentId) ?? a.holderDepartmentId;
+        movements.push({ assetId: a.id!, kind: 'ASSIGNED', fromLocationId: a.locationId, fromLocationName: ln, toLocationId: a.locationId, toLocationName: ln, fromStatus: 'IN_STOCK', toStatus: 'ASSIGNED', toHolderType: 'DEPARTMENT', toHolderId: a.holderDepartmentId, toHolderName: hn, effectiveAt: new Date(now.getTime() + 1), actorId, actorName: actor.name, reason: 'Imported' });
+        assignments.push({ assetId: a.id!, holderType: 'DEPARTMENT', holderId: a.holderDepartmentId, holderName: hn, startAt: now, assignedById: actorId, source: 'IMPORT' });
       }
       for (const w of r.plan!.warnings) {
         dupFlags.push({ assetId: a.id!, matchedAssetId: w.matchId, key: w.key, value: w.value, reason: warningReason ?? 'Accepted during import', createdById: actorId });
