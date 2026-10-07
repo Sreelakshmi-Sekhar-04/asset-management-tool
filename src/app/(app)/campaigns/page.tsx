@@ -27,14 +27,14 @@ export default function Campaigns() {
   const scopeOptions = (locs ?? []).filter((l) => (f.scope === 'REGIONS' ? l.type !== 'BRANCH' : l.type === 'BRANCH'));
   return (
     <div className="space-y-4">
-      <PageHeader title="Campaigns" subtitle="Physical checks of the assets at each branch" actions={<>
+      <PageHeader title="Physical Audit" subtitle="Physical checks of the assets at each branch" actions={<>
         <Link href="/campaigns/discrepancies" className="btn">Discrepancies</Link>
-        {me.isIT && <button className="btn btn-primary" onClick={() => setOpen(true)}>New campaign</button>}
+        {me.isIT && <button className="btn btn-primary" onClick={() => setOpen(true)}>New physical audit</button>}
       </>} />
-      <Card title="All campaigns">
-        {!camps?.length ? <p className="text-sm text-slate-500">No campaigns yet.</p> : (
+      <Card title="All audits">
+        {!camps?.length ? <p className="text-sm text-slate-500">No physical audits yet.</p> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Campaign</th><th>Due</th><th>Status</th><th>Branches</th><th>Not started</th><th>In progress</th><th>Submitted</th><th>Signed off</th><th>Overdue</th></tr></thead>
+            <thead><tr><th>Audit</th><th>Due</th><th>Status</th><th>Branches</th><th>Not started</th><th>In progress</th><th>Submitted</th><th>Signed off</th><th>Overdue</th></tr></thead>
             <tbody>{camps.map((c) => (
               <tr key={c.id}>
                 <td><Link href={`/campaigns/${c.id}`} className="font-medium">{c.name}</Link>{c.recurrenceQuarterly && <span className="ml-1 text-xs text-slate-500">↻ quarterly{c.nextRunAt ? `, next ${fmtDateOnly(c.nextRunAt)}` : ''}</span>}</td>
@@ -46,18 +46,18 @@ export default function Campaigns() {
         )}
       </Card>
       <div>
-        <h2 className="mb-2">{me.isBranch ? 'My campaign tasks' : 'Branch tasks'}</h2>
+        <h2 className="mb-2">{me.isBranch ? 'My audit tasks' : 'Branch tasks'}</h2>
         <DataTable rows={tasks?.rows ?? []} total={tasks?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
           toolbar={cf.strip()}
           columns={[
             { key: 'branch', header: 'Branch', filter: me.isBranch ? undefined : cf.location('locationId', 'Branch'), render: (r) => <Link href={`/campaigns/tasks/${r.id}`} className="font-medium">{r.location.namePath}</Link> },
-            { key: 'campaign', header: 'Campaign', filter: cf.option('campaignId', 'Campaign', (camps ?? []).map((c) => ({ value: c.id, label: c.name })), 'All campaigns'), render: (r) => <span className="text-xs">{r.campaign.name}<br />Due {fmtDateOnly(r.campaign.dueDate)}</span> },
+            { key: 'campaign', header: 'Campaign', filter: cf.option('campaignId', 'Audit', (camps ?? []).map((c) => ({ value: c.id, label: c.name })), 'All audits'), render: (r) => <span className="text-xs">{r.campaign.name}<br />Due {fmtDateOnly(r.campaign.dueDate)}</span> },
             { key: 'status', header: 'Status', filter: cf.option('status', 'Status', TASK_STATUS, 'All statuses'), render: (r) => <span className="flex flex-col items-start gap-1"><TaskStatus s={r.status} />{r.overdue && <Badge tone="red">Overdue</Badge>}</span> },
             { key: 'progress', header: 'Progress', render: (r) => <span className="text-xs">{r.stats.total - r.stats.unmarked} of {r.stats.total} marked{r.stats.inTransit ? ` · ${r.stats.inTransit} in transit (excluded)` : ''}</span> },
             { key: 'disc', header: 'Discrepancies', render: (r) => <span className="text-xs">{r.stats.missing} missing · {r.stats.wrong} wrong · {r.stats.unlisted} unlisted{r.stats.pendingReview ? <b className="block text-amber-700">{r.stats.pendingReview} awaiting IT review</b> : null}</span> },
           ]} />
       </div>
-      <FormModal open={open} onClose={() => setOpen(false)} title="New campaign" submitLabel="Create campaign"
+      <FormModal open={open} onClose={() => setOpen(false)} title="New physical audit" submitLabel="Create audit"
         onSubmit={async () => { const r = await api<{ tasks: number; lines: number }>('/api/verification/campaigns', { body: f }); toast(`Created ${r.tasks} branch task(s) with ${r.lines} assets`); reload(); }}>
         <Field label="Name" required><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} required /></Field>
         <Field label="Due date" required><input className="input" type="date" min={todayIST()} value={f.dueDate} onChange={(e) => setF({ ...f, dueDate: e.target.value })} required /></Field>

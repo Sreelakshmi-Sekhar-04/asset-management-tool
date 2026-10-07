@@ -12,7 +12,7 @@ import { AssetQrCard, PrintLabelsDialog } from '@/components/labels';
 import { useMe } from '@/components/me';
 import { HolderPicker, LocationSelect, type HolderValue } from '@/components/pickers';
 import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
-import { DuplicateDetails, TransferStatusCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
+import { DuplicateDetails, StatusCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
 import { Badge, Card, ErrorBox, Field, FormModal, Modal, PageHeader, Spinner, Tabs, useToast } from '@/components/ui';
 
 interface Detail {
@@ -23,7 +23,7 @@ interface Detail {
   renewables: { id: string; type: string; label: string; expiryDate: string; status: string; source: string | null; vendor: string | null }[];
   assignments: { id: string; holderType: string; holderName: string; startAt: string; endAt: string | null; source: string }[];
   duplicates: DuplicateInfo[];
-  transferStatus: string; transfer: TransferInfo | null;
+  transferStatus: string; displayStatus: string; condition: string | null; transfer: TransferInfo | null;
   deviceData: { id: string; sourceKey: string; externalId: string | null; os: string | null; osVersion: string | null; lastSeen: string | null; currentUser: string | null; patchStatus: string | null; lastPatched: string | null; applications: unknown[]; updatedAt: string }[];
   exceptions: { id: string; reason: string; transferId: string; createdAt: string }[];
   pendingApprovals: { id: string; requestNo: string; action: string; summary: string }[];
@@ -45,7 +45,7 @@ export default function AssetDetail() {
   if (error) return <ErrorBox error={error} />;
   if (!a) return <div className="flex justify-center py-20"><Spinner /></div>;
   const retired = a.status === 'RETIRED';
-  const locked = !!a.openTransfer || a.pendingApprovals.length > 0;
+  const locked = !!a.openTransfer || a.pendingApprovals.length > 0 || a.exceptions.length > 0;
   const done = (msg: string) => (r: unknown) => {
     const p = (r as { pendingApproval?: { requestNo: string; policy: string } })?.pendingApproval;
     toast(p ? `Sent for approval: ${p.requestNo} (${p.policy})` : msg);
@@ -54,7 +54,7 @@ export default function AssetDetail() {
   return (
     <div className="space-y-4">
       <PageHeader back={{ href: '/assets', label: 'Asset register' }}
-        title={<span className="flex flex-wrap items-center gap-2">{a.assetCode} <AssetStatus s={a.status} /> <Flags flags={a.flags} /></span>}
+        title={<span className="flex flex-wrap items-center gap-2">{a.assetCode} <AssetStatus s={a.displayStatus} /> <Flags flags={a.flags} /></span>}
         subtitle={`${a.category} · ${a.make} ${a.model}${a.serialNumber ? ` · S/N ${a.serialNumber}` : ''}`}
         actions={<>
           {!retired && <button className="btn" onClick={() => setDlg('edit')}>Edit</button>}
@@ -70,9 +70,14 @@ export default function AssetDetail() {
 
       {justRegistered && <div className="flex flex-wrap items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm">Registered as <b className="font-mono">{a.assetCode}</b>. Print its label and attach it to the device.<button className="btn btn-sm btn-primary" onClick={() => setDlg('label')}>Print label</button></div>}
       {scanned && <div className="flex flex-wrap items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm">Opened from a scan.<Link className="btn btn-sm" href="/scan">Scan next</Link></div>}
-      {a.openTransfer && <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">Part of transfer {a.openTransfer.transferNo} to {a.openTransfer.toLocation}, raised before transfers moved into the asset register.</div>}
+      {a.openTransfer && (
+        <div className="rounded-md border border-purple-200 bg-purple-50 px-3 py-2 text-sm">
+          Transfer {a.openTransfer.transferNo} to {a.openTransfer.toLocation} has both approvals and is waiting for the destination to confirm receipt. The asset stays at {a.location} until then.
+          {a.transfer && <> <Link href={`/approvals/${a.transfer.id}`}>Open the transfer</Link></>}
+        </div>
+      )}
       {a.pendingApprovals.map((p) => <div key={p.id} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm">Pending approval <Link href={`/approvals/${p.id}`}>{p.requestNo}</Link>: {p.summary}. The asset is locked until it is decided.</div>)}
-      {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Transfer exception on record: {x.reason}. Transfer it again from here once it is found, or clear the flag.</div>)}
+      {a.exceptions.map((x) => <div key={x.id} className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm">Not received at the destination: {x.reason}. The asset stays at {a.location} until the destination receives it late or an Administrator closes the exception{a.transfer && <> on <Link href={`/approvals/${a.transfer.id}`}>the transfer</Link></>}.</div>)}
 
       <Tabs value={tab} onChange={setTab} tabs={[{ key: 'overview', label: 'Overview' }, { key: 'history', label: 'History' }, { key: 'renewables', label: `Renewables (${a.renewables.length})` }, { key: 'documents', label: 'Documents' }, ...(a.deviceData.length ? [{ key: 'device', label: 'Device data' }] : [])]} />
 
@@ -82,8 +87,7 @@ export default function AssetDetail() {
             <dl className="kv">
               <dt>Location</dt><dd>{a.location ?? '—'}</dd>
               <dt>Holder</dt><dd>{a.holder ? `${a.holder} (${label(HOLDER_TYPE_LABEL, a.holderType)})` : 'None'}</dd>
-              <dt>Status</dt><dd>{label(STATUS_LABEL, a.status)}</dd>
-              <dt>Transfer status</dt><dd><TransferStatusCell status={a.transferStatus} transfer={a.transfer} /></dd>
+              <dt>Status</dt><dd><StatusCell r={{ ...a, flags: [] }} /></dd>
               {retired && <><dt>Retired</dt><dd>{fmtDateOnly(a.retiredAt)} by {a.raw.retiredBy ?? '—'} · {a.disposalType?.toLowerCase()} · {a.retireReason}</dd></>}
             </dl>
           </Card>

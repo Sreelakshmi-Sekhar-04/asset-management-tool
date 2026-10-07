@@ -8,6 +8,8 @@ import { pendingStage, type ApprovalReq } from '@/components/approval-chain';
 import { DataTable, emptySelection, useListState, type Selection } from '@/components/list';
 import { useColumnFilters } from '@/components/list-filters';
 import { useMe } from '@/components/me';
+import { TransferStatus } from '@/components/badges';
+import { ReceiveDialog, type Shipment } from '@/components/transfer-receipt';
 import { Badge, Field, FormModal, PageHeader, Tabs, useToast } from '@/components/ui';
 
 type Row = ApprovalReq & { canAct: boolean; canCancel: boolean; entityType: string | null; entityId: string | null };
@@ -22,7 +24,7 @@ export default function Approvals() {
   q.delete('view');
   if (view === 'actionable') q.set('actionable', 'true');
   if (view === 'mine') q.set('mine', 'true');
-  const { data, loading, reload } = useApi<{ rows: Row[]; total: number }>(`/api/approvals?${q}`);
+  const { data, loading, reload } = useApi<{ rows: Row[]; total: number }>(view === 'receive' ? null : `/api/approvals?${q}`);
   const [sel, setSel] = useState<Selection>(emptySelection());
   const [bulk, setBulk] = useState<'' | 'APPROVE' | 'REJECT'>('');
   const [comment, setComment] = useState('');
@@ -33,14 +35,15 @@ export default function Approvals() {
   return (
     <div>
       <PageHeader title="Approvals" subtitle="You cannot approve your own request (Administrators excepted). Parallel steps all need a decision; sequential steps run in order." />
-      <Tabs value={view} onChange={(v) => { ls.setMany({ view: v }); setSel(emptySelection()); }} tabs={[{ key: 'actionable', label: 'Awaiting my decision' }, { key: 'mine', label: 'My requests' }, { key: 'all', label: 'All visible' }]} />
+      <Tabs value={view} onChange={(v) => { ls.setMany({ view: v }); setSel(emptySelection()); }} tabs={[{ key: 'actionable', label: 'Awaiting my decision' }, { key: 'receive', label: 'To receive' }, { key: 'mine', label: 'My requests' }, { key: 'all', label: 'All visible' }]} />
+      {view === 'receive' && <ToReceive />}
       {view === 'actionable' && ids.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <button className="btn btn-sm btn-primary" onClick={() => { setBulk('APPROVE'); setComment(''); }}>Approve {ids.length}</button>
           <button className="btn btn-sm btn-danger" onClick={() => { setBulk('REJECT'); setComment(''); }}>Reject {ids.length}</button>
         </div>
       )}
-      <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
+      {view !== 'receive' && <DataTable rows={data?.rows ?? []} total={data?.total ?? 0} loading={loading} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
         selection={view === 'actionable' && me.isIT ? sel : undefined} onSelection={setSel} empty={view === 'actionable' ? 'Nothing is waiting for you.' : 'No requests.'}
         toolbar={f.strip()}
         columns={[
@@ -50,7 +53,7 @@ export default function Approvals() {
           { key: 'policy', header: 'Rule', render: (r) => <span className="text-xs text-slate-500">{r.policyName}</span> },
           { key: 'by', header: 'Raised by', render: (r) => <span className="text-xs">{r.initiatorName}<br />{fmtDateTime(r.createdAt)}</span> },
           { key: 'status', header: 'Status', filter: statusFilter, render: (r) => <span className="flex flex-col items-start gap-1"><Badge tone={TONE[r.status]}>{r.status.toLowerCase()}</Badge>{r.status === 'PENDING' && <span className="text-xs text-slate-500">{pendingStage(r)}</span>}</span> },
-        ]} />
+        ]} />}
       <FormModal open={!!bulk} onClose={() => setBulk('')} title={`${bulk === 'APPROVE' ? 'Approve' : 'Reject'} ${ids.length} request(s)`} submitLabel={bulk === 'APPROVE' ? 'Approve' : 'Reject'} danger={bulk === 'REJECT'}
         onSubmit={async () => {
           const r = await api<{ succeeded: number; failed: number; results: { ok: boolean; error?: string }[] }>('/api/approvals/bulk-decide', { body: { requestIds: ids, decision: bulk, comment: comment || undefined } });
@@ -60,5 +63,30 @@ export default function Approvals() {
         <Field label={bulk === 'REJECT' ? 'Reason (required)' : 'Comment'} required={bulk === 'REJECT'}><textarea className="input" value={comment} onChange={(e) => setComment(e.target.value)} required={bulk === 'REJECT'} /></Field>
       </FormModal>
     </div>
+  );
+}
+
+/** Approved transfers waiting for me to confirm what arrived (destination managers and Administrators). */
+function ToReceive() {
+  const { data, loading, reload } = useApi<Shipment[]>('/api/transfers/to-receive');
+  const [receiving, setReceiving] = useState<Shipment | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const short = (p: string) => p.split(' / ').pop();
+  return (
+    <>
+      <p className="mb-3 text-sm text-slate-600">Transfers with both approvals. Nothing moves until the destination confirms what actually arrived and its condition.</p>
+      <DataTable rows={(data ?? []).slice((page - 1) * pageSize, page * pageSize)} total={data?.length ?? 0} loading={loading} page={page} pageSize={pageSize} onPage={setPage} empty="Nothing is waiting for you to receive."
+        columns={[
+          { key: 'transferNo', header: 'Transfer', render: (s) => <Link href={`/approvals/${s.approvalRequestId}`} className="font-medium">{s.transferNo}</Link> },
+          { key: 'assets', header: 'Assets', render: (s) => <span className="text-xs">{s.lines.filter((l) => l.open).map((l) => `${l.assetCode} ${l.name}`).join(', ')}</span> },
+          { key: 'from', header: 'From', render: (s) => short(s.from) },
+          { key: 'to', header: 'To', render: (s) => short(s.to) },
+          { key: 'approved', header: 'Approved', render: (s) => <span className="text-xs">{s.approverNames}<br />{fmtDateTime(s.approvedAt)}</span> },
+          { key: 'status', header: 'Status', render: (s) => <TransferStatus s={s.status} /> },
+          { key: 'act', header: '', render: (s) => s.canReceive && <button className="btn btn-sm btn-primary" onClick={() => setReceiving(s)}>Confirm receipt</button> },
+        ]} />
+      {receiving && <ReceiveDialog shipment={receiving} onClose={() => setReceiving(null)} onDone={reload} />}
+    </>
   );
 }

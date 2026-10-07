@@ -10,6 +10,13 @@ export interface NotificationInput {
   eventKey: string;
   /** Override whether to email (default: per-type setting). */
   email?: boolean;
+  /** The email, when it should say more than the in-app notification (subject defaults to the title). */
+  mail?: { subject?: string; text: string; html?: string };
+}
+
+/** An absolute link into the application, for emails. */
+export function appUrl(path: string) {
+  return `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '')}${path}`;
 }
 
 export async function enqueueEmail(to: string, subject: string, text: string, eventKey: string, db: Db = prisma) {
@@ -28,9 +35,11 @@ export async function notifyUsers(db: Db, userIds: (string | null | undefined)[]
   const s = await getSettings(db);
   const sendEmail = n.email ?? s.notificationEmail[n.type] ?? false;
   if (sendEmail) {
-    const url = n.link ? `${process.env.APP_URL ?? 'http://localhost:3000'}${n.link}` : '';
+    const url = n.link ? appUrl(n.link) : '';
     await db.emailOutbox.createMany({
-      data: users.map((u) => ({ to: u.email, subject: n.title, text: `${n.body}${url ? `\n\nOpen: ${url}` : ''}`, eventKey: n.eventKey })),
+      data: users.filter((u) => u.email).map((u) => n.mail
+        ? { to: u.email.toLowerCase(), subject: n.mail.subject ?? n.title, text: n.mail.text, html: n.mail.html ?? null, eventKey: n.eventKey }
+        : { to: u.email.toLowerCase(), subject: n.title, text: `${n.body}${url ? `\n\nOpen: ${url}` : ''}`, eventKey: n.eventKey }),
       skipDuplicates: true,
     });
   }

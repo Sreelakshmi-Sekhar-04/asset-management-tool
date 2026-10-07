@@ -11,7 +11,7 @@ export const GET = route<{ id: string }>({}, async ({ actor, params, url }) => {
     columns: [
       { key: 'assetCode', header: 'Asset ID' }, { key: 'category', header: 'Category' }, { key: 'make', header: 'Make' }, { key: 'model', header: 'Model' },
       { key: 'serialNumber', header: 'Serial' }, { key: 'hostname', header: 'Hostname' }, { key: 'lastVerified', header: 'Verified on' }, { key: 'branch', header: 'Branch' },
-      { key: 'campaign', header: 'Campaign' }, { key: 'signedOffBy', header: 'Signed off by' }, { key: 'signedOffAt', header: 'Signed off' },
+      { key: 'campaign', header: 'Physical audit' }, { key: 'signedOffBy', header: 'Signed off by' }, { key: 'signedOffAt', header: 'Signed off' },
     ],
   }));
 });

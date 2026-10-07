@@ -26,11 +26,6 @@ export const APPROVAL_ACTION_LABEL: Record<string, string> = {
 };
 /** Every action a request can carry, transfers included. */
 export const HISTORIC_ACTION_LABEL: Record<string, string> = { ...APPROVAL_ACTION_LABEL, TRANSFER: 'Transfer' };
-/** The asset register's Transfer status column. */
-export const ASSET_TRANSFER_STATUS_LABEL: Record<string, string> = {
-  NONE: 'No transfer', PENDING_ADMIN: 'Pending admin approval', PENDING_LOCATION_MANAGER: 'Pending location manager approval',
-  APPROVED: 'Transferred', REJECTED: 'Transfer rejected',
-};
 export const RENEWABLE_TYPE_LABEL: Record<string, string> = {
   WARRANTY: 'Warranty', LICENCE: 'Licence', SUBSCRIPTION: 'Subscription', AMC: 'AMC', CALIBRATION: 'Calibration',
   INSURANCE: 'Insurance', CERTIFICATE: 'Certificate', OTHER: 'Other',

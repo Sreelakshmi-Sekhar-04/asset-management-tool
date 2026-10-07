@@ -20,8 +20,8 @@ export default function CampaignPage() {
   return (
     <div className="space-y-4">
       {node}
-      <PageHeader back={{ href: '/campaigns', label: 'Campaigns' }} title={d.campaign.name} subtitle={`Due ${fmtDateOnly(d.campaign.dueDate)}${d.campaign.recurrenceQuarterly ? ' · repeats quarterly' : ''}`}
-        actions={me.isIT && d.campaign.status === 'ACTIVE' && <button className="btn" onClick={async () => { if (await confirm('Close this campaign? Open tasks stay as they are; recurrence stops.')) { try { await api(`/api/verification/campaigns/${id}/close`, { method: 'POST' }); toast('Campaign closed'); reload(); } catch (e) { toast((e as Error).message, 'err'); } } }}>Close campaign</button>} />
+      <PageHeader back={{ href: '/campaigns', label: 'Physical Audit' }} title={d.campaign.name} subtitle={`Due ${fmtDateOnly(d.campaign.dueDate)}${d.campaign.recurrenceQuarterly ? ' · repeats quarterly' : ''}`}
+        actions={me.isIT && d.campaign.status === 'ACTIVE' && <button className="btn" onClick={async () => { if (await confirm('Close this audit? Open tasks stay as they are; recurrence stops.')) { try { await api(`/api/verification/campaigns/${id}/close`, { method: 'POST' }); toast('Audit closed'); reload(); } catch (e) { toast((e as Error).message, 'err'); } } }}>Close audit</button>} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Not started" value={d.buckets.notStarted} /><Stat label="In progress" value={d.buckets.inProgress} /><Stat label="Submitted" value={d.buckets.submitted} tone={d.buckets.submitted ? 'amber' : undefined} /><Stat label="Signed off" value={d.buckets.signedOff} tone="green" /><Stat label="Overdue" value={d.buckets.overdue} tone={d.buckets.overdue ? 'red' : undefined} />
       </div>

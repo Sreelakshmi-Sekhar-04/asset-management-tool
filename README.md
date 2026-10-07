@@ -13,7 +13,7 @@ This repository implements **Phase 1 only** (cuts A, B and R1 of the FRD). Procu
 | Lifecycle | Assign, check-in, repair and retire, single or in bulk (all-or-nothing), each optionally approval-gated. |
 | Transfers | Assigning assets to a location, from the asset register, moves them there in one action, one asset or many. The move is recorded on each asset's history and audit trail. |
 | Approvals | Configurable policies by category, cost, bulk size, inter-state and initiator role, with sequential or parallel steps. The requester cannot approve their own request. |
-| Verification | Campaigns snapshot each branch. Branches mark Present, Missing or Wrong details and add unlisted assets. IT reviews and signs off. Quarterly recurrence. |
+| Physical Audit | Audits snapshot each branch. Branches mark Present, Missing or Wrong details and add unlisted assets. IT reviews and signs off. Quarterly recurrence. |
 | Renewals | Warranties, licences, AMCs and more. Tiered reminders fire once per cycle, with acknowledge, snooze, renew and escalation. |
 | Imports | CSV and Excel, 20,000 rows. Async dry run with a row report, then an atomic commit that refuses to apply if the data changed. |
 | Integrations | Generic authenticated device hook (push) and pull. AD/LDAP directory sync. Field-level overwrite, warn and ignore rules, a conflict queue, an unmatched queue and idempotent batches. |
@@ -51,9 +51,11 @@ Full instructions: [docs/SETUP.md](docs/SETUP.md).
 | `npm run build` / `npm start` | Production build and web server |
 | `npm run worker` | Background worker (imports, email, reminders, schedules, integrations) |
 | `npm run db:migrate` | Apply migrations (`prisma migrate deploy`) |
-| `npm run db:seed` | Demo data, ~5 of each, 5 people (3 sign-ins), Kerala locations, development only |
+| `npm run db:seed` | Demo data, ~5 of each, 5 people (3 sign-ins), South India locations, development only |
 | `npm run db:seed:large` | Large demo organisation for volume and load tests |
 | `npm run db:reset-demo -- --yes` | Deletes all data and loads the demo data (~5 of each, 5 people (3 sign-ins)), development only |
+| `npm run db:south-only -- --yes` | Keeps only South India locations in an existing database, moving what was elsewhere (dry run without `--yes`), development only |
+| `npm run mail:test -- you@x.com` | Sends one test email with the configured `SMTP_URL` |
 | `npm run db:trim-assets -- --yes` | Keeps 5 assets and deletes the rest with their history, development only |
 | `npm run db:generate-volume -- --assets 20000` | Volume data for performance testing, development only |
 | `npm test` | Automated tests against a disposable `*_test` database |

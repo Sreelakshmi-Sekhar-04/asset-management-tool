@@ -218,7 +218,7 @@ export const REPORTS: ReportDef[] = [
     run: (a, f, p) => listRenewables(a, { search: s(f, 'search'), name: s(f, 'name'), asset: s(f, 'asset'), owner: s(f, 'owner'), type: list(f, 'type'), status: list(f, 'status'), locationId: s(f, 'locationId'), assetId: s(f, 'assetId'), withinDays: s(f, 'withinDays') ? Number(s(f, 'withinDays')) : undefined, expired: s(f, 'expired') === 'true' }, { ...p, sort: 'expiryDate' }),
   },
   {
-    key: 'verification-status', title: 'Campaign status', description: 'Each branch task per campaign with progress, discrepancies and sign-off.',
+    key: 'verification-status', title: 'Physical audit status', description: 'Each branch task per audit with progress, discrepancies and sign-off.',
     filters: ['campaignId', 'status'],
     columns: [
       { key: 'campaign.name', header: 'Campaign' }, { key: 'location.namePath', header: 'Branch' }, { key: 'status', header: 'Status', format: (v) => label(VER_TASK_LABEL, v as string) },
@@ -229,7 +229,7 @@ export const REPORTS: ReportDef[] = [
     run: (a, f, p) => listTasks(a, { campaignId: s(f, 'campaignId'), status: s(f, 'status'), ...p }),
   },
   {
-    key: 'verification-discrepancies', title: 'Campaign discrepancies', description: 'Missing and wrong-details lines with IT review outcome.',
+    key: 'verification-discrepancies', title: 'Physical audit discrepancies', description: 'Missing and wrong-details lines with IT review outcome.',
     filters: ['campaignId', 'review'],
     columns: [
       { key: 'task.campaign.name', header: 'Campaign' }, { key: 'task.location.namePath', header: 'Branch' }, { key: 'assetCode', header: 'Asset ID' },

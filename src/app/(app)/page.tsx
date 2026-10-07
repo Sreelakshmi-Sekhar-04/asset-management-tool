@@ -1,10 +1,14 @@
 'use client';
 import Link from 'next/link';
+import { ASSET_STATUS_OPTIONS } from '@/lib/asset-status';
 import { fmtDateOnly, fmtDateTime } from '@/lib/format';
 import { useApi } from '@/components/api';
 import { TaskStatus } from '@/components/badges';
 import { useMe } from '@/components/me';
 import { Card, ErrorBox, PageHeader, Spinner, Stat } from '@/components/ui';
+
+/** Every Status except Retired: the active assets, whatever their transfer state. */
+const ACTIVE = ASSET_STATUS_OPTIONS.filter((s) => s !== 'RETIRED').map((s) => `status=${s}`).join('&');
 
 interface Dash {
   scope: string;
@@ -30,12 +34,12 @@ export default function Dashboard() {
     <div className="space-y-4">
       <PageHeader title="Dashboard" subtitle={`Figures for ${d.scope}`} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-        <Stat label="Active assets" value={d.assets.total} href="/assets?status=IN_STOCK&status=ASSIGNED&status=UNDER_REPAIR" />
+        <Stat label="Active assets" value={d.assets.total} href={`/assets?${ACTIVE}`} />
         <Stat label="Assigned" value={d.assets.assigned} href="/assets?status=ASSIGNED" />
         <Stat label="In stock" value={d.assets.inStock} href="/assets?status=IN_STOCK" />
         <Stat label="Under repair" value={d.assets.underRepair} href="/assets?status=UNDER_REPAIR" tone={d.assets.underRepair ? 'amber' : undefined} />
         <Stat label="Retired" value={d.assets.retired} href="/reports/retired" />
-        <Stat label={d.approvals.mine ? 'My pending requests' : 'Awaiting my approval'} value={d.approvals.total} href="/approvals" tone={d.approvals.total ? 'amber' : undefined} />
+        <Stat label={d.approvals.mine ? 'My pending requests' : 'Awaiting my approval or receipt'} value={d.approvals.total} href="/approvals" tone={d.approvals.total ? 'amber' : undefined} />
         <Stat label="Transferred ≤ 30 days" value={d.transfers.recent} href="/reports/transfer-history" />
         <Stat label="Expiring ≤ 30 days" value={d.expiring.d30} href="/reports/expiry-outlook?withinDays=30" tone={d.expiring.d30 ? 'amber' : undefined} />
         <Stat label="Expiring ≤ 60 days" value={d.expiring.d60} href="/reports/expiry-outlook?withinDays=60" />
@@ -47,7 +51,7 @@ export default function Dashboard() {
             <ul className="space-y-2 text-sm">
               {d.byLocation.map((l) => (
                 <li key={l.id}>
-                  <div className="flex justify-between gap-2"><Link href={`/assets?locationId=${l.id}&status=IN_STOCK&status=ASSIGNED&status=UNDER_REPAIR`}>{l.name}</Link><span className="text-slate-600">{l.total}</span></div>
+                  <div className="flex justify-between gap-2"><Link href={`/assets?locationId=${l.id}&${ACTIVE}`}>{l.name}</Link><span className="text-slate-600">{l.total}</span></div>
                   <div className="mt-1 flex h-2 overflow-hidden rounded bg-slate-100" title={`Assigned ${l.assigned} · In stock ${l.inStock} · Under repair ${l.underRepair}`}>
                     <div className="bg-green-500" style={{ width: `${(l.assigned / max) * 100}%` }} />
                     <div className="bg-blue-400" style={{ width: `${(l.inStock / max) * 100}%` }} />
@@ -69,12 +73,12 @@ export default function Dashboard() {
         <Card title="Flags">
           <ul className="space-y-1.5 text-sm">
             <li className="flex justify-between"><Link href="/assets?flag=TRANSFER_EXCEPTION">Transfer exception</Link><span>{d.flags.transferException}</span></li>
-            <li className="flex justify-between"><Link href="/assets?flag=MISSING">Missing (campaign)</Link><span>{d.flags.missing}</span></li>
+            <li className="flex justify-between"><Link href="/assets?flag=MISSING">Missing (physical audit)</Link><span>{d.flags.missing}</span></li>
             <li className="flex justify-between"><Link href="/reports/duplicates">Duplicate-suspect</Link><span>{d.flags.duplicateSuspect}</span></li>
           </ul>
         </Card>
-        <Card title="Campaign progress" className="lg:col-span-2" actions={<Link href="/campaigns" className="text-xs">All campaigns</Link>}>
-          {d.verification.length === 0 ? <p className="text-sm text-slate-500">No active campaigns.</p> : d.verification.map((c) => (
+        <Card title="Physical audit progress" className="lg:col-span-2" actions={<Link href="/campaigns" className="text-xs">All audits</Link>}>
+          {d.verification.length === 0 ? <p className="text-sm text-slate-500">No active physical audits.</p> : d.verification.map((c) => (
             <div key={c.id} className="mb-3 last:mb-0">
               <div className="flex flex-wrap justify-between gap-2 text-sm"><Link href={`/campaigns/${c.id}`} className="font-medium">{c.name}</Link><span className="text-xs text-slate-500">Due {fmtDateOnly(c.dueDate)}</span></div>
               <div className="mt-1 flex h-2 overflow-hidden rounded bg-slate-100">

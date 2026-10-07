@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db';
 import { badRequest, notFound } from '@/lib/errors';
-import { fmtDateOnly } from '@/lib/format';
+import { fmtDateOnly, fmtDateTime } from '@/lib/format';
 import { MOVEMENT_LABEL, STATUS_LABEL } from '@/lib/labels';
 import type { Actor } from '../actor';
 import { getScopedAsset, inScopePath } from '../scope';
@@ -12,7 +12,7 @@ const MOVEMENT_AUDITS = new Set(['ASSET_CREATED', 'ASSET_ASSIGNED', 'ASSET_REASS
 
 const AUDIT_TITLE: Record<string, string> = {
   ASSET_UPDATED: 'Details edited', APPROVAL_REQUESTED: 'Approval requested', DUPLICATE_FLAG_CLEARED: 'Duplicate flag cleared', ASSET_FLAG_CLEARED: 'Flag cleared',
-  VERIFICATION_DISCREPANCY_ACCEPTED: 'Campaign discrepancy accepted', VERIFICATION_DISCREPANCY_REJECTED: 'Campaign discrepancy rejected',
+  VERIFICATION_DISCREPANCY_ACCEPTED: 'Physical audit discrepancy accepted', VERIFICATION_DISCREPANCY_REJECTED: 'Physical audit discrepancy rejected',
   TRANSFER_LINE_RECALLED: 'Transfer line recalled', TRANSFER_EXCEPTION_RESOLVED: 'Transfer exception resolved', ASSET_ID_CHANGE_REJECTED: 'Attempt to change Asset ID rejected',
   ACCESS_DENIED: 'Access denied',
 };
@@ -33,7 +33,12 @@ export async function assetTimeline(actor: Actor, idOrCode: string): Promise<Tim
   ]);
   const transferIds = [...new Set(lines.map((l) => l.transferId))];
   const transferAudits = transferIds.length
-    ? await prisma.auditLog.findMany({ where: { entityType: 'Transfer', entityId: { in: transferIds }, action: { in: ['TRANSFER_CREATED', 'TRANSFER_SUBMITTED', 'TRANSFER_APPROVED', 'TRANSFER_AUTO_APPROVED', 'TRANSFER_REJECTED', 'TRANSFER_CANCELLED', 'TRANSFER_RECALLED'] } }, orderBy: { at: 'asc' } })
+    ? await prisma.auditLog.findMany({ where: { entityType: 'Transfer', entityId: { in: transferIds }, action: { in: ['TRANSFER_CREATED', 'TRANSFER_SUBMITTED', 'TRANSFER_APPROVED', 'TRANSFER_AUTO_APPROVED', 'TRANSFER_REJECTED', 'TRANSFER_CANCELLED', 'TRANSFER_RECALLED', 'TRANSFER_DISPATCHED', 'TRANSFER_RECEIPT_RECORDED', 'TRANSFER_COMPLETED'] } }, orderBy: { at: 'asc' } })
+    : [];
+  // Each approval decision on a transfer request for this asset (first approval, destination approval, rejection).
+  const transferRequests = await prisma.approvalRequest.findMany({ where: { action: 'TRANSFER', assetIds: { has: asset.id } }, select: { id: true, requestNo: true } });
+  const decisions = transferRequests.length
+    ? await prisma.auditLog.findMany({ where: { entityType: 'ApprovalRequest', entityId: { in: transferRequests.map((r) => r.id) }, action: { in: ['APPROVAL_APPROVED', 'APPROVAL_REJECTED', 'APPROVAL_CANCELLED'] } }, orderBy: { at: 'asc' } })
     : [];
   const items: TimelineItem[] = [];
   for (const m of movements) {
@@ -43,8 +48,8 @@ export async function assetTimeline(actor: Actor, idOrCode: string): Promise<Tim
     else if (m.kind === 'ASSIGNED') { title = `Assigned to ${m.toHolderName}`; if (m.fromHolderName) d.push(`Previous holder: ${m.fromHolderName}`); }
     else if (m.kind === 'CHECKED_IN') { title = `Checked in from ${m.fromHolderName ?? '—'}`; if (m.condition) d.push(`Condition: ${m.condition}`); }
     else if (m.kind === 'TRANSFERRED') { title = `Transferred to ${m.toLocationName}`; if (m.fromLocationName) d.push(`From: ${m.fromLocationName}`); if (m.fromHolderName && !m.toHolderName) d.push(`Released from: ${m.fromHolderName}`); }
-    else if (m.kind === 'TRANSFER_RECEIVED') { title = `Received at ${m.toLocationName}`; d.push(`From: ${m.fromLocationName}`); if (m.approverName) d.push(`Approved by: ${m.approverName}`); if (m.receivedByName) d.push(`Received by: ${m.receivedByName}`); }
-    else if (m.kind === 'TRANSFER_NOT_RECEIVED') { title = `Not received at destination — remains at ${m.fromLocationName}`; if (m.receivedByName) d.push(`Recorded by: ${m.receivedByName}`); }
+    else if (m.kind === 'TRANSFER_RECEIVED') { title = `Received at ${m.toLocationName}`; d.push(`From: ${m.fromLocationName}`); if (m.approverName) d.push(`Approved by: ${m.approverName}`); if (m.receivedByName) d.push(`Received by: ${m.receivedByName}`); if (m.condition) d.push(`Condition: ${m.condition}`); }
+    else if (m.kind === 'TRANSFER_NOT_RECEIVED') { title = `Not received at destination — remains at ${m.fromLocationName}`; if (m.receivedByName) d.push(`Recorded by: ${m.receivedByName}`); if (m.condition) d.push(`Condition: ${m.condition}`); }
     else if (m.kind === 'REPAIR_STARTED' || m.kind === 'REPAIR_COMPLETED' || m.kind === 'RETIRED') { if (m.toStatus) d.push(`Status: ${STATUS_LABEL[m.fromStatus ?? ''] ?? '—'} → ${STATUS_LABEL[m.toStatus]}`); }
     else if (m.kind === 'CORRECTION') { title = 'Correction (location/holder)'; d.push(`Location: ${m.fromLocationName ?? '—'} → ${m.toLocationName ?? '—'}`, `Holder: ${m.fromHolderName ?? '—'} → ${m.toHolderName ?? '—'}`); }
     if (m.reason) d.push(`Reason: ${m.reason}`);
@@ -60,6 +65,14 @@ export async function assetTimeline(actor: Actor, idOrCode: string): Promise<Tim
     const after = (a.after ?? {}) as Record<string, unknown>;
     for (const k of Object.keys(after)) d.push(`${k}: ${fmtVal(before[k])} → ${fmtVal(after[k])}`);
     const det = (a.details ?? {}) as Record<string, unknown>;
+    if (a.action === 'APPROVAL_REQUESTED' && det.action === 'TRANSFER') {
+      items.push({ at: a.at, kind: 'TRANSFER_REQUESTED', title: `Transfer requested to ${det.to ?? '—'}`, actor: a.actorEmail, details: [`Request: ${det.requestNo}`, ...(det.remarks ? [`Remarks: ${det.remarks}`] : [])] });
+      continue;
+    }
+    if (a.action === 'TRANSFER_EXCEPTION_RAISED') {
+      items.push({ at: a.at, kind: a.action, title: `Transfer exception: not received at ${det.to ?? 'the destination'}`, actor: a.actorEmail, details: [`Transfer: ${det.transferNo}`, `Reason: ${det.reason}`] });
+      continue;
+    }
     if (det.serialChangeReason) d.push(`Reason: ${det.serialChangeReason}`);
     if (det.reason) d.push(`Reason: ${det.reason}`);
     if (det.requestNo) d.push(`Request: ${det.requestNo}`);
@@ -72,14 +85,32 @@ export async function assetTimeline(actor: Actor, idOrCode: string): Promise<Tim
     const titles: Record<string, string> = {
       TRANSFER_CREATED: `Transfer ${a.entityLabel} created (${det.from} → ${det.to})`, TRANSFER_SUBMITTED: `Transfer ${a.entityLabel} submitted${det.approval ? ' for approval' : ''}`,
       TRANSFER_APPROVED: `Transfer ${a.entityLabel} approved — in transit`, TRANSFER_AUTO_APPROVED: `Transfer ${a.entityLabel} auto-approved — in transit`,
-      TRANSFER_REJECTED: `Transfer ${a.entityLabel} rejected`, TRANSFER_CANCELLED: `Transfer ${a.entityLabel} cancelled`, TRANSFER_RECALLED: `Transfer ${a.entityLabel} recalled`,
+      TRANSFER_REJECTED: `Transfer ${a.entityLabel} rejected`, TRANSFER_CANCELLED: `Transfer ${a.entityLabel} closed: nothing was received`, TRANSFER_RECALLED: `Transfer ${a.entityLabel} recalled`,
+      TRANSFER_DISPATCHED: `Transfer ${a.entityLabel} dispatched: both approvals given, awaiting receipt at ${String(det.to ?? '').split(' / ').pop()}`,
+      TRANSFER_RECEIPT_RECORDED: `Receipt recorded for transfer ${a.entityLabel}`, TRANSFER_COMPLETED: `Transfer ${a.entityLabel} completed`,
     };
     const d: string[] = [];
     if (det.reason && a.action === 'TRANSFER_CREATED') d.push(`Reason: ${det.reason}`);
     if (det.approvers) d.push(`Approved by: ${det.approvers}`);
     if (det.comment) d.push(`Comment: ${det.comment}`);
+    if (a.action === 'TRANSFER_DISPATCHED' && det.from) d.push(`From: ${det.from}`, `To: ${det.to}`);
+    if (a.action === 'TRANSFER_RECEIPT_RECORDED') {
+      d.push(`Received by: ${det.receivedBy}`, `Received at: ${fmtDateTime(det.receivedAt as string)}`);
+      const mine = Array.isArray(det.conditions) ? (det.conditions as { asset: string; condition: string; remarks: string | null }[]).find((c) => c.asset === asset.assetCode) : null;
+      if (mine) { d.push(`Condition: ${mine.condition}`); if (mine.remarks) d.push(`Remarks: ${mine.remarks}`); }
+      if (det.remarks) d.push(`Notes: ${det.remarks}`);
+    }
+    if ((a.action === 'TRANSFER_DISPATCHED' && Array.isArray(det.assets) && !(det.assets as string[]).includes(asset.assetCode))) continue;
     if (a.action === 'TRANSFER_RECALLED' && Array.isArray(det.assets) && !(det.assets as string[]).includes(asset.assetCode)) continue;
     items.push({ at: a.at, kind: a.action, title: titles[a.action], actor: a.actorEmail, details: d, ref: { type: 'transfer', id: a.entityId!, label: a.entityLabel ?? '' } });
+  }
+  const reqNo = new Map(transferRequests.map((r) => [r.id, r.requestNo]));
+  for (const a of decisions) {
+    const det = (a.details ?? {}) as Record<string, unknown>;
+    const no = reqNo.get(a.entityId ?? '') ?? a.entityLabel;
+    const step = det.step === 1 ? 'first approval (admin manager)' : det.step === 2 ? 'destination location manager approval' : `step ${det.step}`;
+    const title = a.action === 'APPROVAL_APPROVED' ? `Transfer ${no}: ${step} given` : a.action === 'APPROVAL_REJECTED' ? `Transfer ${no} rejected at the ${step}` : `Transfer ${no} withdrawn`;
+    items.push({ at: a.at, kind: a.action, title, actor: a.actorEmail, details: det.comment ? [`Comment: ${det.comment}`] : [], ref: { type: 'approval', id: a.entityId!, label: no ?? '' } });
   }
   const users = await prisma.user.findMany({ where: { email: { in: items.map((i) => i.actor).filter((x): x is string => !!x && x.includes('@')) } }, select: { email: true, name: true } });
   const nm = new Map(users.map((u) => [u.email, u.name]));

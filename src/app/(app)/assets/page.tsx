@@ -5,18 +5,17 @@ import { useState } from 'react';
 import { api, useApi } from '@/components/api';
 import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
-import { AssetStatus, Flags } from '@/components/badges';
 import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
-import { Dash, DuplicateDetails, HolderCell, LocationCell, TransferStatusCell, useAssetColumnFilters, WarrantyCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
+import { Dash, DuplicateDetails, HolderCell, LocationCell, StatusCell, useAssetColumnFilters, WarrantyCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
 import { ActiveFilters } from '@/components/column-filter';
 import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
-import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
+import { ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
 export interface AssetRow {
   id: string; assetCode: string; legacyTag: string | null; category: string; make: string; model: string; serialNumber: string | null; hostname: string | null; ipAddress: string | null;
   status: string; location: string | null; holderType: string | null; holder: string | null; warrantyEnd: string | null; flags: string[]; openTransfer: { id: string; transferNo: string; status: string; toLocation: string } | null;
-  transferStatus: string; transfer: TransferInfo | null; duplicates: DuplicateInfo[];
+  transferStatus: string; displayStatus: string; condition: string | null; transfer: TransferInfo | null; duplicates: DuplicateInfo[];
 }
 
 export default function AssetRegister() {
@@ -36,8 +35,9 @@ export default function AssetRegister() {
   const { filters, chips } = useAssetColumnFilters(ls);
   const selPayload = () => (sel.mode === 'ids' ? { assetIds: [...sel.ids] } : { filter: assetFiltersFromQuery(ls.query), excludeIds: [...sel.exclude] });
 
-  // Asset ID, Category, Legacy tag, IP address, Status and Transfer status each have their own
-  // column, first, so they are in view; the rest follow and the table scrolls sideways when needed.
+  // Asset ID, Category, Legacy tag, IP address and Status each have their own column, first, so they
+  // are in view; the rest follow and the table scrolls sideways when needed. Status is one column:
+  // the lifecycle status, or the transfer's state while one is in progress.
   const baseCols: Column<AssetRow>[] = [
     { key: 'assetCode', header: 'Asset ID', sortable: true, className: 'align-middle', render: (r) => <Link href={`/assets/${r.id}`} className="whitespace-nowrap font-semibold">{r.assetCode}</Link> },
     { key: 'name', header: 'Asset name', sortable: true, className: 'align-middle', render: (r) => (
@@ -49,13 +49,10 @@ export default function AssetRegister() {
     { key: 'ipAddress', header: 'IP address', sortable: true, className: 'align-middle', render: (r) => (r.ipAddress ? <span className="whitespace-nowrap font-mono text-xs">{r.ipAddress}</span> : <Dash />) },
     { key: 'status', header: 'Status', sortable: true, className: 'align-middle', render: (r) => (
       <span className="flex flex-col items-start gap-1">
-        <AssetStatus s={r.status} />
-        {r.openTransfer && <Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge>}
-        {r.flags.length > 0 && <Flags flags={r.flags} />}
+        <StatusCell r={r} />
         <DuplicateDetails items={r.duplicates} compact />
       </span>
     ) },
-    { key: 'transferStatus', header: 'Transfer status', sortable: true, className: 'align-middle', render: (r) => <TransferStatusCell status={r.transferStatus} transfer={r.transfer} /> },
     { key: 'location', header: 'Location', sortable: true, className: 'align-middle', render: (r) => <LocationCell path={r.location} /> },
     { key: 'holder', header: 'Assigned to', className: 'align-middle', render: (r) => <HolderCell type={r.holderType} holder={r.holder} /> },
     { key: 'hostname', header: 'Hostname', sortable: true, className: 'align-middle', render: (r) => (r.hostname ? <span className="whitespace-nowrap">{r.hostname}</span> : <Dash />) },

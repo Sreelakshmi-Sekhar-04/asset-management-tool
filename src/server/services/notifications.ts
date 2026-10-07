@@ -38,6 +38,22 @@ export async function listEmailOutbox(actor: Actor, p: { status?: string; skip: 
   return { rows, total };
 }
 
+/**
+ * The emails a request sent (the approvers of each step, and the receiver once approved), with
+ * their real delivery state from the outbox: queued, sent (the mail server accepted it) or failed
+ * with the server's error. Nothing here claims an email went out unless the send succeeded.
+ */
+export async function emailsForRequest(actor: Actor, requestId: string) {
+  const req = await prisma.approvalRequest.findUnique({ where: { id: requestId }, include: { tasks: { select: { approverUserId: true } } } });
+  const { canSeeRequest } = await import('./approvals');
+  if (!req || !(await canSeeRequest(actor, req))) throw notFound('Approval request');
+  return prisma.emailOutbox.findMany({
+    where: { OR: [{ eventKey: { startsWith: `approval:${requestId}:` } }, { eventKey: { startsWith: `transfer:${requestId}:` } }] },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, to: true, subject: true, status: true, attempts: true, lastError: true, createdAt: true, sentAt: true, nextAttemptAt: true },
+  });
+}
+
 export async function retryEmail(actor: Actor, id: string) {
   if (actor.role !== 'ADMIN') throw forbidden();
   const e = await prisma.emailOutbox.findUnique({ where: { id } });

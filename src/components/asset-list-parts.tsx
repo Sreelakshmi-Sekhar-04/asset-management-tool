@@ -2,8 +2,9 @@
 import clsx from 'clsx';
 import Link from 'next/link';
 import { fmtDateOnly } from '@/lib/format';
-import { ASSET_TRANSFER_STATUS_LABEL, label, STATUS_LABEL } from '@/lib/labels';
-import { AssetTransferStatus } from './badges';
+import { ASSET_STATUS_LABEL, ASSET_STATUS_OPTIONS } from '@/lib/asset-status';
+import { label } from '@/lib/labels';
+import { AssetStatus, Flags } from './badges';
 import { type useListState } from './list';
 import { MultiOptionFilter, OptionFilter, SelectFilter, TextFilter, type ColumnFilterDef, type FilterChip } from './column-filter';
 import { LocationSelect, useCategories, useLocations } from './pickers';
@@ -27,9 +28,9 @@ export function useAssetColumnFilters(ls: ListState) {
   const { data: locs } = useLocations();
   const warranty = ls.get('warrantyWithinDays') || (ls.get('warrantyExpired') ? 'expired' : '');
   const statuses = ls.getAll('status');
+  // Older links and saved filters may still carry a transfer-status filter; it shows as a chip.
   const transferStatuses = ls.getAll('transferStatus');
-  const transferOpts: Opt[] = Object.entries(ASSET_TRANSFER_STATUS_LABEL).map(([value, label]) => ({ value, label }));
-  const statusOpts: Opt[] = Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }));
+  const statusOpts: Opt[] = ASSET_STATUS_OPTIONS.map((value) => ({ value, label: ASSET_STATUS_LABEL[value] }));
   const catOpts: Opt[] = (cats ?? []).map((c) => ({ value: c.id, label: c.name }));
   const text = (k: string, placeholder: string, hint?: string): ColumnFilterDef => ({
     active: !!ls.get(k),
@@ -75,10 +76,6 @@ export function useAssetColumnFilters(ls: ListState) {
         <div className="border-t pt-3"><OptionFilter label="Flag" value={ls.get('flag')} options={FLAG_OPTS} allLabel="No flag filter" onChange={(v) => ls.set('flag', v)} close={close} /></div>
       </>,
     },
-    transferStatus: {
-      active: transferStatuses.length > 0,
-      content: (close) => <MultiOptionFilter label="Transfer status" values={transferStatuses} options={transferOpts} onApply={(v) => ls.set('transferStatus', v)} close={close} />,
-    },
     warrantyEnd: {
       active: !!warranty,
       content: (close) => (
@@ -102,8 +99,8 @@ export function useAssetColumnFilters(ls: ListState) {
   if (ls.get('locationId')) chips.push({ label: `Location: ${locs?.find((l) => l.id === ls.get('locationId'))?.name ?? '…'}`, clear: () => ls.set('locationId', null) });
   chip('holder', 'Assigned to');
   if (ls.get('holderType')) chips.push({ label: `Holder: ${optLabel(HOLDER_OPTS, ls.get('holderType'))}`, clear: () => ls.set('holderType', null) });
-  if (statuses.length) chips.push({ label: `Status: ${statuses.map((st) => label(STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('status', null) });
-  if (transferStatuses.length) chips.push({ label: `Transfer: ${transferStatuses.map((st) => label(ASSET_TRANSFER_STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('transferStatus', null) });
+  if (statuses.length) chips.push({ label: `Status: ${statuses.map((st) => label(ASSET_STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('status', null) });
+  if (transferStatuses.length) chips.push({ label: `Transfer: ${transferStatuses.join(', ').toLowerCase().replace(/_/g, ' ')}`, clear: () => ls.set('transferStatus', null) });
   if (ls.get('flag')) chips.push({ label: `Flag: ${optLabel(FLAG_OPTS, ls.get('flag'))}`, clear: () => ls.set('flag', null) });
   if (warranty) chips.push({ label: `Warranty: ${optLabel(WARRANTY_OPTS, warranty)}`, clear: () => ls.setMany({ warrantyWithinDays: null, warrantyExpired: null }) });
   if (ls.get('hasOpenTransfer')) chips.push({ label: ls.get('hasOpenTransfer') === 'true' ? 'In an open transfer' : 'Not in an open transfer', clear: () => ls.set('hasOpenTransfer', null) });
@@ -113,15 +110,15 @@ export function useAssetColumnFilters(ls: ListState) {
 
 export const Dash = () => <span className="text-slate-300">—</span>;
 
-/** "South / Kerala / Kochi" → Kochi in bold with "South · Kerala" beneath. */
+/** "Joy Alukkas / South India / Kerala / Kochi" → Kochi with its state (the level above) beneath; the full path on hover. */
 export function LocationCell({ path }: { path: string | null }) {
   if (!path) return <Dash />;
   const parts = path.split(' / ');
   const name = parts.pop();
   return (
-    <span className="block">
-      <span className="text-slate-800">{name}</span>
-      {parts.length > 0 && <span className="block text-[11px] text-slate-500">{parts.join(' · ')}</span>}
+    <span className="block" title={path}>
+      <span className="whitespace-nowrap text-slate-800">{name}</span>
+      {parts.length > 0 && <span className="block whitespace-nowrap text-[11px] text-slate-500">{parts.at(-1)}</span>}
     </span>
   );
 }
@@ -154,20 +151,31 @@ export function WarrantyCell({ end }: { end: string | null }) {
 
 export interface TransferInfo { id: string; requestNo: string; toLocation: string | null; rejectedBy: string | null; reason: string | null }
 
-/** Transfer status column: the status, the destination while pending, and why a rejected one was rejected. */
-export function TransferStatusCell({ status, transfer }: { status: string; transfer: TransferInfo | null }) {
-  if (status === 'NONE' || !transfer) return <span className="text-xs text-slate-400">No transfer</span>;
-  const to = transfer.toLocation?.split(' / ').pop();
+/**
+ * The register's single Status: the lifecycle status, or the transfer state while a transfer is in
+ * progress (and its outcome until the asset next changes), with the transfer's reference and
+ * destination, why a rejected one was rejected, and a damaged arrival's condition.
+ */
+export function StatusCell({ r }: { r: { displayStatus: string; transfer: TransferInfo | null; openTransfer: { transferNo: string; toLocation: string } | null; condition?: string | null; flags?: string[] } }) {
+  const t = r.transfer;
+  const transferState = r.displayStatus in TRANSFER_STATES;
+  const to = (r.openTransfer?.toLocation ?? t?.toLocation)?.split(' / ').pop();
+  const damaged = r.displayStatus === 'TRANSFERRED' && r.condition && r.condition !== 'Good';
   return (
     <span className="flex min-w-[9rem] flex-col items-start gap-0.5">
-      <AssetTransferStatus s={status} title={transfer.requestNo} />
-      <span className="text-[11px] text-slate-500">
-        <Link href={`/approvals/${transfer.id}`}>{transfer.requestNo}</Link>{to ? ` · to ${to}` : ''}
-      </span>
-      {status === 'REJECTED' && transfer.reason && <span className="max-w-[14rem] text-[11px] text-red-700">{transfer.rejectedBy ? `${transfer.rejectedBy}: ` : ''}{transfer.reason}</span>}
+      <AssetStatus s={r.displayStatus} />
+      {transferState && t && (
+        <span className="text-[11px] text-slate-500">
+          <Link href={`/approvals/${t.id}`}>{r.openTransfer?.transferNo ?? t.requestNo}</Link>{to ? ` · to ${to}` : ''}
+        </span>
+      )}
+      {damaged && <span className="text-[11px] font-medium text-red-700">Received {r.condition!.toLowerCase()}</span>}
+      {r.displayStatus === 'TRANSFER_REJECTED' && t?.reason && <span className="max-w-[14rem] text-[11px] text-red-700">{t.rejectedBy ? `${t.rejectedBy}: ` : ''}{t.reason}</span>}
+      {r.flags && r.flags.length > 0 && <Flags flags={r.flags.filter((f) => !(f === 'Transfer exception' && r.displayStatus === 'TRANSFER_NOT_RECEIVED'))} />}
     </span>
   );
 }
+const TRANSFER_STATES: Record<string, true> = { PENDING_TRANSFER_APPROVAL: true, PENDING_LOCATION_MANAGER_APPROVAL: true, TRANSFER_APPROVED: true, TRANSFER_NOT_RECEIVED: true, TRANSFERRED: true, TRANSFER_REJECTED: true };
 
 export interface DuplicateInfo {
   field: string; fieldLabel: string; value: string; reason: string | null;
