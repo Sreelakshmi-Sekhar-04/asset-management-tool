@@ -39,7 +39,7 @@ function Inner() {
   return (
     <div className="space-y-4">
       {node}
-      <PageHeader back={job.type === 'ASSETS' ? { href: '/assets/bulk-add?tab=excel', label: 'Bulk add / Import' } : { href: '/imports', label: 'Imports' }} title={job.fileName}
+      <PageHeader back={job.type === 'ASSETS' ? { href: '/assets/new?tab=excel', label: 'Create asset' } : { href: '/imports', label: 'Imports' }} title={job.fileName}
         subtitle={<span className="flex flex-wrap items-center gap-2">{IMPORT_TYPE[job.type]} · {job.mode === 'CREATE_ONLY' ? 'create new only' : 'create or update'} · by {job.createdByName} {fmtDateTime(job.createdAt)} <ImportStatus s={job.status} /></span>}
         actions={<>
           {!running && job.totalRows > 0 && !job.reportPurgedAt && <button className="btn" onClick={() => download(`/api/imports/${id}/report`).catch((e) => toast(e.message, 'err'))}>Download row report</button>}

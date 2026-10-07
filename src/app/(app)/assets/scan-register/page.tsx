@@ -14,7 +14,7 @@ type Saved = { id: string; assetCode: string } | { pendingId: string; requestNo:
 
 /**
  * Quick registration: scan the serial-number barcode on the device (camera, USB or Bluetooth scanner),
- * check the details and save. The same fields and rules as the Register asset form apply.
+ * check the details and save. The same fields and rules as the Create asset form apply.
  */
 export default function ScanRegister() {
   const toast = useToast();
