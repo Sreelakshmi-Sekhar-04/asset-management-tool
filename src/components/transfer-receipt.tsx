@@ -140,26 +140,3 @@ export function ReceiveDialog({ shipment: s, onClose, onDone }: { shipment: Ship
     </FormModal>
   );
 }
-
-const MAIL_TONE: Record<string, string> = { PENDING: 'amber', SENT: 'green', FAILED: 'red' };
-
-/** The emails this request sent and what really happened to each: queued, sent, or failed with the error. */
-export function EmailDeliveries({ requestId }: { requestId: string }) {
-  const { data } = useApi<{ id: string; to: string; subject: string; status: string; attempts: number; lastError: string | null; createdAt: string; sentAt: string | null }[]>(`/api/approvals/${requestId}/emails`);
-  if (!data?.length) return null;
-  return (
-    <Card title="Email notifications">
-      <ul className="space-y-2 text-sm">
-        {data.map((m) => (
-          <li key={m.id} className="flex flex-wrap items-start justify-between gap-2">
-            <span><span className="font-medium">{m.to}</span><span className="block text-xs text-slate-500">{m.subject}</span></span>
-            <span className="text-right text-xs">
-              <Badge tone={MAIL_TONE[m.status]}>{m.status === 'PENDING' ? (m.attempts ? 'Retrying' : 'Queued') : m.status === 'SENT' ? 'Sent' : 'Not sent'}</Badge>
-              <span className="block text-slate-500">{m.status === 'SENT' ? fmtDateTime(m.sentAt) : m.lastError ?? `queued ${fmtDateTime(m.createdAt)}`}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
