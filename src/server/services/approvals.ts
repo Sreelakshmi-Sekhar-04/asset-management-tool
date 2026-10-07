@@ -7,6 +7,7 @@ import type { Actor } from '../actor';
 import { resolveOrg } from '../org';
 import { audit } from '../audit';
 import { notifyUsers } from '../notify';
+import { transferMail } from '../transfer-email';
 
 // ───────────── Policy configuration (FR-APR-01..03, FR-CFG-07) ─────────────
 
@@ -159,12 +160,15 @@ async function notifyApprovers(db: Db, requestId: string, link?: string) {
   const req = await db.approvalRequest.findUniqueOrThrow({ where: { id: requestId }, include: { tasks: { where: { status: 'PENDING' } } } });
   const ids = new Set<string>();
   for (const t of req.tasks) for (const id of await approverUserIds(db, t, req.initiatorRole === 'ADMIN' ? undefined : req.initiatorId)) ids.add(id);
+  const transfer = req.action === 'TRANSFER';
   await notifyUsers(db, [...ids], {
-    type: req.action === 'TRANSFER' ? 'TRANSFER_APPROVAL_REQUESTED' : 'APPROVAL_REQUESTED',
+    type: transfer ? 'TRANSFER_APPROVAL_REQUESTED' : 'APPROVAL_REQUESTED',
     title: `Approval needed: ${req.summary}`,
     body: `${req.initiatorName} requested ${(HISTORIC_ACTION_LABEL[req.action] ?? req.action).toLowerCase()} (${req.requestNo}). Policy: ${req.policyName}.`,
-    link: link ?? `/approvals?request=${req.id}`,
+    link: transfer ? `/approvals/${req.id}` : link ?? `/approvals?request=${req.id}`,
     eventKey: `approval:${req.id}:order:${req.currentOrder}`,
+    // A transfer's approvers get the details by email: reference, assets, both locations, the first approval.
+    ...(transfer ? { mail: await transferMail(db, req, req.currentOrder <= 1 ? 'APPROVAL_1' : 'APPROVAL_2') } : {}),
   });
 }
 
@@ -335,7 +339,10 @@ export async function inboxCounts(actor: Actor) {
       total++;
     }
   }
-  return { total, byAction: counts };
+  // Approved transfers waiting for this user to confirm receipt are in the same inbox.
+  const { toReceiveCount } = await import('./transfer-receipt');
+  const toReceive = await toReceiveCount(actor);
+  return { total: total + toReceive, byAction: counts, toReceive };
 }
 
 export async function getRequest(actor: Actor, id: string) {
@@ -351,8 +358,19 @@ export async function getRequest(actor: Actor, id: string) {
     const members = ids.length && ids.length <= 3 ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true }, orderBy: { name: 'asc' } }) : [];
     roleNames.set(role, members.length ? members.map((u) => u.name).join(', ') : null);
   }
+  // A transfer request shows what moves where: each asset with its serial and current location, and the destination.
+  let transfer: { to: string | null; assets: { id: string; assetCode: string; name: string; serialNumber: string | null; from: string | null }[] } | null = null;
+  if (r.action === 'TRANSFER') {
+    const pl = r.payload as { assetIds?: string[]; toLocationId?: string };
+    const [assets, to] = await Promise.all([
+      prisma.asset.findMany({ where: { id: { in: pl.assetIds ?? [] } }, orderBy: { assetCode: 'asc' }, select: { id: true, assetCode: true, make: true, model: true, serialNumber: true, location: { select: { namePath: true } } } }),
+      pl.toLocationId ? prisma.location.findUnique({ where: { id: pl.toLocationId }, select: { namePath: true } }) : null,
+    ]);
+    transfer = { to: to?.namePath ?? null, assets: assets.map((a) => ({ id: a.id, assetCode: a.assetCode, name: `${a.make} ${a.model}`, serialNumber: a.serialNumber, from: a.location?.namePath ?? null })) };
+  }
   return {
     ...r,
+    transfer,
     tasks: r.tasks.map((x) => ({ ...x, approverName: x.approverUserId ? names.get(x.approverUserId) : x.approverRole ? roleNames.get(x.approverRole) ?? null : null })),
     canAct: r.status === 'PENDING' && r.tasks.some((x) => x.stepOrder === r.currentOrder && canActOnTask(actor, r, x)),
     canCancel: r.status === 'PENDING' && (r.initiatorId === actor.id || actor.role === 'ADMIN') && !r.tasks.some((x) => x.decidedAt),

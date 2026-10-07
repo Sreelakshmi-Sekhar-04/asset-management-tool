@@ -4,6 +4,7 @@ import type { Asset, Prisma } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
 import { extractAssetCode } from '@/lib/asset-code';
 import { AppError, badRequest, conflict, forbidden, notFound } from '@/lib/errors';
+import { displayStatus, statusFilterParts } from '@/lib/asset-status';
 import { dateOnly, todayIST } from '@/lib/format';
 import type { Actor } from '../actor';
 import { audit, diff } from '../audit';
@@ -405,7 +406,19 @@ export async function assetWhere(actor: Actor, f: AssetFilters): Promise<Prisma.
     });
   }
   if (f.categoryIds?.length) and.push({ categoryId: { in: f.categoryIds } });
-  if (f.statuses?.length) and.push({ status: { in: f.statuses as Asset['status'][] } });
+  if (f.statuses?.length) {
+    // The register's single Status: each value matches the lifecycle status and transfer state that show as it.
+    const or: Prisma.AssetWhereInput[] = [];
+    for (const v of f.statuses) {
+      const p = statusFilterParts(v);
+      if (!p) continue;
+      or.push({
+        ...(p.status ? { status: p.status as Asset['status'] } : { status: { not: 'RETIRED' } }),
+        ...(p.transferStatus.length ? { transferStatus: { in: p.transferStatus as Asset['transferStatus'][] } } : {}),
+      });
+    }
+    and.push(or.length ? { OR: or } : { id: '__none__' });
+  }
   for (const lid of [f.locationId, f.regionId]) {
     if (!lid) continue;
     const loc = await prisma.location.findUnique({ where: { id: lid }, select: { idPath: true } });
@@ -464,13 +477,17 @@ export function shapeAsset(a: AssetRow) {
     flags: [a.flagTransferException && 'Transfer exception', a.flagMissing && 'Missing', a.flagDuplicateSuspect && 'Duplicate-suspect'].filter(Boolean) as string[],
     openTransfer: line ? { id: line.transfer.id, transferNo: line.transfer.transferNo, status: line.status, toLocation: line.transfer.toLocation.namePath } : null,
     transferStatus: a.transferStatus, transferRequestId: a.transferRequestId,
+    /** The one Status people see (lifecycle status and transfer state together). */
+    displayStatus: displayStatus(a.status, a.transferStatus), condition: a.condition,
     updatedAt: a.updatedAt, createdAt: a.createdAt, retiredAt: a.retiredAt, disposalType: a.disposalType, retireReason: a.retireReason,
   };
 }
 
 export async function listAssets(actor: Actor, f: AssetFilters, p: { skip: number; take: number; sort?: string; dir?: 'asc' | 'desc' }) {
   const where = await assetWhere(actor, f);
-  const orderBy = [(SORTS[p.sort ?? ''] ?? SORTS.assetCode)(p.dir ?? (p.sort ? 'asc' : 'desc')), { id: 'asc' as const }];
+  const dir = p.dir ?? (p.sort ? 'asc' : 'desc');
+  // Status sorts by lifecycle status, then by transfer state, the two parts of the one Status.
+  const orderBy = [(SORTS[p.sort ?? ''] ?? SORTS.assetCode)(dir), ...(p.sort === 'status' ? [{ transferStatus: dir }] : []), { id: 'asc' as const }];
   const [rows, total] = await Promise.all([
     prisma.asset.findMany({ where, include: assetListInclude, orderBy, skip: p.skip, take: p.take }),
     prisma.asset.count({ where }),

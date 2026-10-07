@@ -4,6 +4,7 @@ import { actorForUser, cancelRequest, decide, getRequest, listRequests } from '@
 import { listAssets } from '@/server/services/assets';
 import { assignAsset, bulkAssign, bulkCheckIn, checkInAsset } from '@/server/services/lifecycle';
 import { createLocation, updateLocation } from '@/server/services/locations';
+import { receiveTransfer } from '@/server/services/transfer-receipt';
 import { createUser } from '@/server/services/users';
 import { world, PASSWORD, type World } from './fixtures';
 import { rejectsWith } from './helpers';
@@ -15,6 +16,15 @@ const movements = (assetId: string) => prisma.assetMovement.findMany({ where: { 
 const asset = (id: string) => prisma.asset.findUniqueOrThrow({ where: { id } });
 type Result = { mode: string; assigned: number; assignable: number; pendingApproval?: { id: string; requestNo: string }; failed: { ref: string; message: string }[]; skipped: { ref: string }[]; approvals?: string[] };
 const transfer = async (assetIds: string[], to: string, remarks?: string) => bulkAssign(w.it.actor, { assetIds, holder: { type: 'LOCATION', id: to }, remarks }) as Promise<Result>;
+const shipment = (requestId: string) => prisma.transfer.findFirstOrThrow({ where: { approvalRequestId: requestId }, include: { lines: true } });
+/** The destination confirms receipt: every asset in the given condition (GOOD unless named). */
+const receive = async (actor: World['admin']['actor'], requestId: string, cond: Record<string, { condition: string; remarks?: string }> = {}) => {
+  const s = await shipment(requestId);
+  return receiveTransfer(actor, s.id, {
+    receivedAt: new Date().toISOString(), receivedByName: actor.name,
+    lines: s.lines.filter((l) => l.status === 'IN_TRANSIT' || cond[l.assetId]).map((l) => ({ lineId: l.id, condition: cond[l.assetId]?.condition ?? 'GOOD', remarks: cond[l.assetId]?.remarks })),
+  });
+};
 
 describe('assign to an employee is an assignment', () => {
   it('one asset to an employee: assigned at once, with no transfer approval', async () => {
@@ -33,7 +43,7 @@ describe('assign to an employee is an assignment', () => {
 });
 
 describe('assign to a location is a transfer with two approvals', () => {
-  it('one asset: Pending admin approval, then Pending location manager approval, then Transferred', async () => {
+  it('one asset: Pending admin approval, then Pending location manager approval, then awaiting receipt, then Transferred', async () => {
     const a = await w.asset(w.A.id);
     const r = await assignAsset(w.it.actor, a.id, { holder: { type: 'LOCATION', id: w.B.id }, remarks: 'Desk move' }) as Result;
     expect(r.mode).toBe('TRANSFER');
@@ -53,11 +63,17 @@ describe('assign to a location is a transfer with two approvals', () => {
     expect(now).toMatchObject({ locationId: w.A.id, transferStatus: 'PENDING_LOCATION_MANAGER' });
     expect((await prisma.approvalRequest.findUniqueOrThrow({ where: { id: req.id } })).status).toBe('PENDING');
 
-    await decide(w.brB.actor, req.id, 'APPROVE', 'Received');
+    await decide(w.brB.actor, req.id, 'APPROVE', 'Send it');
+    // Approved is not received: the asset has not moved and waits for the destination.
     now = await asset(a.id);
-    expect(now).toMatchObject({ locationId: w.B.id, status: 'IN_STOCK', transferStatus: 'APPROVED' });
+    expect(now).toMatchObject({ locationId: w.A.id, status: 'IN_STOCK', transferStatus: 'APPROVED' });
+    expect(await shipment(req.id)).toMatchObject({ status: 'IN_TRANSIT', fromLocationId: w.A.id, toLocationId: w.B.id });
+
+    await receive(w.brB.actor, req.id);
+    now = await asset(a.id);
+    expect(now).toMatchObject({ locationId: w.B.id, status: 'IN_STOCK', transferStatus: 'RECEIVED', condition: 'Good' });
     const m = (await movements(a.id)).at(-1)!;
-    expect(m.kind).toBe('TRANSFERRED');
+    expect(m.kind).toBe('TRANSFER_RECEIVED');
     expect(m.fromLocationId).toBe(w.A.id);
     expect(m.toLocationId).toBe(w.B.id);
     expect(m.remarks).toBe('Desk move');
@@ -76,8 +92,10 @@ describe('assign to a location is a transfer with two approvals', () => {
     await decide(w.admin.actor, r.pendingApproval!.id, 'APPROVE');
     expect(await prisma.asset.count({ where: { id: { in: ids }, transferStatus: 'PENDING_LOCATION_MANAGER', locationId: w.A.id } })).toBe(5);
     await decide(w.brB.actor, r.pendingApproval!.id, 'APPROVE');
-    expect(await prisma.asset.count({ where: { id: { in: ids }, transferStatus: 'APPROVED', locationId: w.B.id } })).toBe(5);
-    for (const a of assets) expect((await movements(a.id)).at(-1)!.kind).toBe('TRANSFERRED');
+    expect(await prisma.asset.count({ where: { id: { in: ids }, transferStatus: 'APPROVED', locationId: w.A.id } })).toBe(5);
+    await receive(w.brB.actor, r.pendingApproval!.id);
+    expect(await prisma.asset.count({ where: { id: { in: ids }, transferStatus: 'RECEIVED', locationId: w.B.id } })).toBe(5);
+    for (const a of assets) expect((await movements(a.id)).at(-1)!.kind).toBe('TRANSFER_RECEIVED');
   });
 
   it('a rejection by the administrator stops the transfer; the asset stays where it was', async () => {
@@ -127,6 +145,8 @@ describe('assign to a location is a transfer with two approvals', () => {
     // While it waits, the asset cannot be moved another way.
     await rejectsWith(bulkAssign(w.it.actor, { assetIds: [a.id], holder: { type: 'EMPLOYEE', id: w.empA.id } }), 400, /None of the 1/);
     await decide(w.brB.actor, id, 'APPROVE');
+    expect((await asset(a.id)).locationId).toBe(w.A.id);
+    await receive(w.brB.actor, id);
     expect((await asset(a.id)).locationId).toBe(w.B.id);
   });
 
@@ -143,7 +163,7 @@ describe('assign to a location is a transfer with two approvals', () => {
     const r = await bulkAssign(w.it.actor, { assetIds: [stay.id, move.id], holder: { type: 'LOCATION', id: w.B.id }, dryRun: true }) as Result;
     expect(r.assignable).toBe(1);
     expect(r.skipped.map((s) => s.ref)).toEqual([stay.assetCode]);
-    expect(r.approvals).toEqual([`Admin manager: ${w.admin.user.name}`, `Location manager: ${w.brB.user.name} (${w.B.name})`]);
+    expect(r.approvals).toEqual([`Admin manager: ${w.admin.user.name}`, `Location manager: ${w.brB.user.name} (${w.B.name})`, `Receipt: ${w.brB.user.name} confirms what arrived and its condition; only then does the asset move`]);
     expect(await asset(move.id)).toMatchObject({ locationId: w.A.id, transferStatus: 'NONE' });
     expect(await prisma.approvalRequest.count({ where: { assetIds: { has: move.id } } })).toBe(0);
   });
@@ -176,7 +196,13 @@ describe('assign to a location is a transfer with two approvals', () => {
     const r = await transfer([a.id], w.B.id);
     await decide(w.admin.actor, r.pendingApproval!.id, 'APPROVE');
     await decide(w.brB.actor, r.pendingApproval!.id, 'APPROVE');
+    // In transit: nothing else can happen to it until it is received.
+    await rejectsWith(assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } }), 409, /open transfer/);
+    await receive(w.brB.actor, r.pendingApproval!.id);
+    expect((await asset(a.id)).transferStatus).toBe('RECEIVED');
     await assignAsset(w.it.actor, a.id, { holder: { type: 'EMPLOYEE', id: w.empA.id } });
+    // The asset's next change ends the "Transferred" status; its lifecycle status shows again.
+    expect((await asset(a.id)).transferStatus).toBe('NONE');
     await checkInAsset(w.it.actor, a.id, {});
     expect((await asset(a.id)).status).toBe('IN_STOCK');
     const b = await w.asset(w.A.id);

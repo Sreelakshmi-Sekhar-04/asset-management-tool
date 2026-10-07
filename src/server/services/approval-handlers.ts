@@ -1,6 +1,7 @@
 import type { ApprovalAction, ApprovalRequest, Prisma } from '@prisma/client';
 import type { Actor } from '../actor';
 import { execAssign, execCheckIn, execBulk, execTransfer, type BulkPayload } from './lifecycle';
+import { dispatchApprovedTransfer } from './transfer-receipt';
 import { bulkAddAssets, createAsset } from './assets';
 import { holderName } from './movement';
 
@@ -56,11 +57,9 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
   // A transfer (assets assigned to a location from the asset register). Step 1 is an
   // Administrator, step 2 the destination's location manager; only after both does anything move.
   TRANSFER: {
-    async execute(t, initiator, req, approvers) {
-      const pl = p<{ assetIds: string[]; toLocationId: string; remarks?: string | null }>(req);
-      const assets = await t.asset.findMany({ where: { id: { in: pl.assetIds } }, orderBy: { assetCode: 'asc' } });
-      for (const asset of assets) await execTransfer(t, initiator, asset, pl.toLocationId, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
-      await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'APPROVED' } });
+    // Both approvals authorise the move; the assets stay put until the destination confirms receipt.
+    async execute(t, initiator, req, approvers, decider) {
+      await dispatchApprovedTransfer(t, initiator, req, approvers, decider);
     },
     async onAdvanced(t, req) {
       await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'PENDING_LOCATION_MANAGER' } });

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ApprovalAction, Asset, Prisma } from '@prisma/client';
 import { prisma, tx, type Db } from '@/lib/db';
 import { badRequest, conflict, forbidden } from '@/lib/errors';
+import { RECEIPT_CONDITION_LABEL } from '@/lib/asset-status';
 import { DISPOSAL_LABEL, STATUS_LABEL } from '@/lib/labels';
 import type { Actor } from '../actor';
 import { audit, auditMany } from '../audit';
@@ -13,6 +14,8 @@ import { assetWhere, type AssetFilters } from './assets';
 
 type Pending = { pendingApproval: { id: string; requestNo: string; policy: string } };
 interface ExecOpts { approvalId?: string; approverName?: string }
+/** The destination confirmed this asset arrived: the move is recorded as a receipt. */
+export interface ReceiptOpts { transferId: string; transferNo: string; lineId: string; receivedByName: string; receivedAt: Date; condition: string }
 
 async function gate(t: Db, actor: Actor, action: ApprovalAction, assets: Asset[], summary: string, payload: Record<string, unknown>): Promise<Pending | null> {
   const ctx = await matchContextForAssets(t, assets.map((a) => a.id), actor.role);
@@ -310,7 +313,8 @@ export async function bulkReassign(actor: Actor, assetIds: string[], toEmployeeI
  * department) is released; a location holder follows the asset. Every change is recorded as a
  * movement and an audit entry, so the asset's history and audit trail stay complete.
  */
-async function preTransfer(t: Db, actor: Actor, asset: Asset, to: { id: string; namePath: string }, opts: ExecOpts = {}) {
+export async function preTransfer(t: Db, actor: Actor, asset: Asset, to: { id: string; namePath: string }, opts: ExecOpts = {}) {
+  if (asset.transferStatus === 'APPROVED') throw conflict(`Asset ${asset.assetCode} is on its way to another location; it can change once the destination confirms receipt.`);
   assertNotRetired(asset);
   if (asset.status === 'UNDER_REPAIR') throw conflict(`Asset ${asset.assetCode} is under repair and cannot be transferred. Complete the repair first.`);
   if (asset.locationId === to.id) throw conflict(`Asset ${asset.assetCode} is already at ${to.namePath}.`);
@@ -319,9 +323,10 @@ async function preTransfer(t: Db, actor: Actor, asset: Asset, to: { id: string; 
   await validateHolder(t, actor, { type: 'LOCATION', id: to.id }, await orgOfLocation(t, asset.locationId));
 }
 
-export async function execTransfer(t: Db, actor: Actor, asset: Asset, toLocationId: string, remarks: string | null, opts: ExecOpts = {}) {
+export async function execTransfer(t: Db, actor: Actor, asset: Asset, toLocationId: string, remarks: string | null, opts: ExecOpts & { receipt?: ReceiptOpts } = {}) {
   const to = await t.location.findUniqueOrThrow({ where: { id: toLocationId }, select: { id: true, namePath: true } });
-  if (opts.approvalId) await preTransfer(t, actor, asset, to, opts);
+  if (opts.approvalId && !opts.receipt) await preTransfer(t, actor, asset, to, opts);
+  const rc = opts.receipt;
   const cur = holderOf(asset);
   const holderTravels = cur?.type === 'LOCATION';
   const nextHolder: HolderRef | null = holderTravels ? { type: 'LOCATION', id: to.id } : null;
@@ -331,19 +336,24 @@ export async function execTransfer(t: Db, actor: Actor, asset: Asset, toLocation
       locationId: to.id,
       ...holderColumns(nextHolder),
       status: nextHolder ? 'ASSIGNED' : 'IN_STOCK',
+      ...(rc ? { condition: RECEIPT_CONDITION_LABEL[rc.condition] ?? rc.condition, transferStatus: 'RECEIVED' as const } : {}),
       updatedById: actor.id === 'system' ? null : actor.id,
     },
   });
-  await switchAssignment(t, actor, asset.id, nextHolder, opts.approvalId ? 'APPROVAL' : 'MANUAL');
-  await recordMovement(t, actor, 'TRANSFERRED', asset, { id: asset.id, status: updated.status, locationId: to.id, holder: nextHolder }, {
+  await switchAssignment(t, actor, asset.id, nextHolder, opts.approvalId ? 'APPROVAL' : 'MANUAL', rc?.receivedAt);
+  await recordMovement(t, actor, rc ? 'TRANSFER_RECEIVED' : 'TRANSFERRED', asset, { id: asset.id, status: updated.status, locationId: to.id, holder: nextHolder }, {
     remarks, approverName: opts.approverName,
     reason: cur && !holderTravels ? `Transferred to ${to.namePath}; released from ${await holderName(t, cur.type, cur.id)}` : `Transferred to ${to.namePath}`,
+    ...(rc ? { transferId: rc.transferId, transferLineId: rc.lineId, receivedByName: rc.receivedByName, effectiveAt: rc.receivedAt, condition: RECEIPT_CONDITION_LABEL[rc.condition] ?? rc.condition } : {}),
   });
   await audit(t, actor, {
     action: 'ASSET_TRANSFERRED', entityType: 'Asset', entityId: asset.id, entityLabel: asset.assetCode,
     before: { locationId: asset.locationId, status: asset.status, holder: cur },
     after: { locationId: to.id, location: to.namePath, status: updated.status, holder: nextHolder },
-    details: { remarks, approvedBy: opts.approverName, releasedHolder: cur && !holderTravels ? await holderName(t, cur.type, cur.id) : null },
+    details: {
+      remarks, approvedBy: opts.approverName, releasedHolder: cur && !holderTravels ? await holderName(t, cur.type, cur.id) : null,
+      ...(rc ? { transferNo: rc.transferNo, receivedBy: rc.receivedByName, receivedAt: rc.receivedAt.toISOString(), condition: RECEIPT_CONDITION_LABEL[rc.condition] ?? rc.condition } : {}),
+    },
     locationIds: [asset.locationId, to.id],
   });
   return updated;
@@ -403,7 +413,7 @@ export async function bulkAssign(actor: Actor, input: unknown) {
     const manager = isTransfer && ok.length ? await locationManager(t, to!.id) : null;
     const admins = manager ? (await t.user.findMany({ where: { role: 'ADMIN', active: true }, select: { name: true }, orderBy: { name: 'asc' }, take: 4 })).map((u) => u.name) : [];
     const adminLabel = admins.length && admins.length <= 3 ? admins.join(' or ') : 'any Administrator';
-    const approvals = manager ? [`Admin manager: ${adminLabel}`, `Location manager: ${manager.name} (${manager.locationName})`] : undefined;
+    const approvals = manager ? [`Admin manager: ${adminLabel}`, `Location manager: ${manager.name} (${manager.locationName})`, `Receipt: ${manager.name} confirms what arrived and its condition; only then does the asset move`] : undefined;
     const result = { mode: isTransfer ? ('TRANSFER' as const) : ('ASSIGN' as const), holder: name, selected: assets.length, skipped, failed, released, approvals };
     if (data.dryRun) return { ...result, assignable: ok.length, assigned: 0 };
     if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be ${verb} to ${name}. Nothing was changed.`, [...failed, ...skipped]);

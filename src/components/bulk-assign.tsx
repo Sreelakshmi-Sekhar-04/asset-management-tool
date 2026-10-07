@@ -108,7 +108,7 @@ export function BulkAssignDialog({ open, onClose, count, selection, onDone }: {
               </ol>
             )}
             {check.mode === 'TRANSFER' && check.released > 0 && (
-              <div className="mt-1 text-xs text-amber-700">{check.released} asset{check.released === 1 ? ' is' : 's are'} currently held by a person or a department; once approved, the holding ends and the asset arrives In stock.</div>
+              <div className="mt-1 text-xs text-amber-700">{check.released} asset{check.released === 1 ? ' is' : 's are'} currently held by a person or a department; once it is received at the destination, the holding ends and the asset arrives In stock.</div>
             )}
             {remarks && <div className="mt-1 text-xs text-slate-500">Remarks: {remarks}</div>}
           </div>

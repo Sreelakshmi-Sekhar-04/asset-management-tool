@@ -5,7 +5,7 @@
  * Run alongside the web app: `npm run worker`.
  */
 import { prisma } from '@/lib/db';
-import { sendPendingEmails } from './email';
+import { sendPendingEmails, verifySmtp } from './email';
 import { drainJobs, runDailyTasks, runIntegrationSchedules } from './tasks';
 
 const TICK_MS = Number(process.env.WORKER_TICK_MS ?? 5_000);
@@ -26,6 +26,8 @@ async function tick() {
 
 async function main() {
   console.log(`[worker] started (tick ${TICK_MS} ms)`);
+  const smtp = await verifySmtp();
+  (smtp.ok ? console.log : console.error)(`[mail] ${smtp.message}`);
   while (!stopping) {
     try {
       await tick();

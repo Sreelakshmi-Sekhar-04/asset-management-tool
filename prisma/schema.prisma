@@ -65,13 +65,19 @@ enum MovementKind {
   CORRECTION
 }
 
-/// Where an asset's latest transfer request stands (shown in the asset register).
+/// Where an asset's latest transfer stands. Shown as part of the asset register's single Status
+/// (src/lib/asset-status.ts), never as a column of its own.
 enum AssetTransferStatus {
   NONE
   PENDING_ADMIN
   PENDING_LOCATION_MANAGER
+  /// Both approvals given: cleared to move, waiting for the destination to confirm receipt.
   APPROVED
   REJECTED
+  /// The destination confirmed receipt (in any condition but "Not received"); the asset moved.
+  RECEIVED
+  /// The destination reported it did not arrive: an open transfer exception, the asset stays at the source.
+  NOT_RECEIVED
 }
 
 enum TransferStatus {
@@ -647,7 +653,8 @@ model Transfer {
   sdpTicketUrl     String?
   invoiceNumber    String?
   autoApproved     Boolean        @default(false)
-  approvalRequestId String?       @unique
+  /// The transfer approval request this shipment came from (one shipment per source location).
+  approvalRequestId String?
   approvedAt       DateTime?
   approverNames    String?
   approvalComment  String?
@@ -667,6 +674,7 @@ model Transfer {
   @@index([fromLocationId, status])
   @@index([toLocationId, status])
   @@index([requestedAt])
+  @@index([approvalRequestId])
   @@map("transfers")
 }
 
@@ -686,6 +694,9 @@ model TransferLine {
   receiptId       String?
   receipt         TransferReceipt?   @relation(fields: [receiptId], references: [id])
   receivedByName  String?
+  /// Condition the destination recorded on receipt: GOOD | DAMAGED | PARTIALLY_DAMAGED | NOT_RECEIVED.
+  receivedCondition String?
+  receivedAt      DateTime?
   rejectReason    String?
   remark          String?
   resolvedAt      DateTime?
@@ -705,6 +716,8 @@ model TransferReceipt {
   actorId        String
   actorName      String
   receivedByName String
+  /// When the goods physically arrived (entered by the receiver; recordedAt is createdAt).
+  receivedAt     DateTime       @default(now())
   remarks        String?
   createdAt      DateTime       @default(now())
   lines          TransferLine[]

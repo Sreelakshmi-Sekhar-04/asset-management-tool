@@ -75,6 +75,11 @@ export async function assertUnlocked(db: Db, assets: { id: string; assetCode: st
     const details = lines.map((l) => ({ ref: code.get(l.assetId), message: `Asset ${code.get(l.assetId)} is part of open transfer ${l.transfer.transferNo}.` }));
     throw conflict(lines.length === 1 ? `${details[0].message.replace('is part of', 'cannot be changed because it is part of')}` : `${lines.length} assets are locked by open transfers.`, details);
   }
+  const exceptions = await db.transferException.findMany({ where: { assetId: { in: ids }, status: 'OPEN' }, select: { assetId: true, line: { select: { transfer: { select: { transferNo: true } } } } } });
+  if (exceptions.length) {
+    const details = exceptions.map((x) => ({ ref: code.get(x.assetId), message: `Asset ${code.get(x.assetId)} was not received on transfer ${x.line.transfer.transferNo}; resolve that exception first.` }));
+    throw conflict(details.length === 1 ? details[0].message : `${details.length} assets have open transfer exceptions.`, details);
+  }
   const pending = await db.approvalRequest.findMany({
     where: { status: 'PENDING', assetIds: { hasSome: ids }, ...(ignoreApprovalId ? { id: { not: ignoreApprovalId } } : {}) },
     select: { requestNo: true, assetIds: true, action: true },
@@ -100,6 +105,8 @@ export interface MovementExtra {
   receivedByName?: string | null;
   isCorrection?: boolean;
 }
+
+const TRANSFER_KINDS = new Set<MovementKind>(['TRANSFERRED', 'TRANSFER_RECEIVED', 'TRANSFER_NOT_RECEIVED']);
 
 export async function recordMovement(
   db: Db,
@@ -138,6 +145,11 @@ export async function recordMovement(
     condition: extra.condition ?? null,
     isCorrection: extra.isCorrection ?? false,
   };
+  // The outcome of the latest transfer (Transferred / Transfer rejected) is the asset's Status only
+  // until its next change; from then on its lifecycle status shows again.
+  if (!TRANSFER_KINDS.has(kind)) {
+    await db.asset.updateMany({ where: { id: after.id, transferStatus: { in: ['RECEIVED', 'REJECTED'] } }, data: { transferStatus: 'NONE' } });
+  }
   return db.assetMovement.create({ data });
 }
 
