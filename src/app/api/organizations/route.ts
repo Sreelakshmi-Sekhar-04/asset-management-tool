@@ -4,8 +4,8 @@ import { createOrganization, listOrganizationsWithCounts } from '@/server/servic
 import { forbidden } from '@/lib/errors';
 
 /**
- * The organizations (head quarters) the caller can work in, and the one currently selected.
- * `?manage=true` is the Configuration → Organizations list: every organization, with counts.
+ * The organization (head quarter) the caller works in. `?manage=true` is the
+ * Configuration → Organizations list, with counts.
  */
 export const GET = route({}, async ({ actor, url }) => {
   if (q(url, 'manage') === 'true') {
@@ -14,8 +14,8 @@ export const GET = route({}, async ({ actor, url }) => {
   }
   const orgs = await listOrganizations();
   const mine = actor.role === 'BRANCH_USER' ? orgs.filter((o) => o.id === actor.orgId) : orgs.filter((o) => o.active || o.id === actor.orgId);
-  return { organizations: mine.map((o) => ({ id: o.id, name: o.name, active: o.active })), selectedId: actor.orgId, canSwitch: actor.role !== 'BRANCH_USER' };
+  return { organizations: mine.map((o) => ({ id: o.id, name: o.name, active: o.active })), selectedId: actor.orgId };
 });
 
-/** Create an organization (Configuration → Organizations only). */
+/** Create an organization. Not offered in the UI while Joy Alukkas is the only organization. */
 export const POST = route({ roles: ['ADMIN'] }, async ({ req, actor }) => createOrganization(actor, await req.json()));

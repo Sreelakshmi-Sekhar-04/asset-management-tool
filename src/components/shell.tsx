@@ -111,7 +111,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {open && <div className="fixed inset-0 z-30 bg-slate-900/30 lg:hidden" onClick={() => setOpen(false)} />}
       <header className="sticky top-0 z-20 flex items-center gap-2 border-b bg-white/95 px-3 py-2 backdrop-blur sm:px-4">
         <button className="btn btn-ghost btn-sm lg:hidden" onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
-        <OrganizationPicker />
         <div className="ml-auto flex items-center gap-2">
           <Link href="/notifications" className="btn btn-ghost btn-sm relative" aria-label={`Notifications (${unread} unread)`}>
             🔔{unread > 0 && <span className="absolute -right-0.5 -top-0.5 rounded-full bg-red-600 px-1.5 text-[10px] font-semibold text-white">{unread > 99 ? '99+' : unread}</span>}
@@ -134,40 +133,5 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mx-auto max-w-[1400px] px-3 py-4 sm:px-6">{children}</main>
     </div>
-  );
-}
-
-/**
- * Organization (head quarter) selector (§12). Choosing one stores it server-side in a cookie
- * and reloads, so every screen — dashboard, asset register, people, locations — shows that
- * organization's data until it is changed (§15).
- */
-function OrganizationPicker() {
-  const me = useMe();
-  const [busy, setBusy] = useState(false);
-  if (!me.organization) return null;
-  if (!me.canSwitchOrganization) {
-    return (
-      <span className="flex items-center gap-1 text-xs text-slate-500">
-        <span className="hidden sm:inline">Organization:</span>
-        <span className="font-medium text-slate-700">{me.organization.name}</span>
-      </span>
-    );
-  }
-  const change = async (id: string) => {
-    if (id === me.organization!.id) return;
-    setBusy(true);
-    try {
-      await api('/api/organizations/select', { body: { organizationId: id } });
-      window.location.reload();
-    } catch { setBusy(false); }
-  };
-  return (
-    <label className="flex items-center gap-1 text-xs text-slate-500">
-      <span className="hidden sm:inline">Organization</span>
-      <select className="input h-8 w-auto max-w-[12rem] py-0 text-sm" value={me.organization.id} disabled={busy} onChange={(e) => change(e.target.value)} aria-label="Organization">
-        {me.organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-      </select>
-    </label>
   );
 }

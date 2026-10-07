@@ -189,9 +189,8 @@ Assets carry optional `sdpTicketId` and `sdpTicketUrl` fields (FR-INT-12). They 
 | `GET` | `/api/saved-filters` | any signed-in |
 | `POST` | `/api/saved-filters` | any signed-in |
 | `GET` | `/api/organizations` | any signed-in (`?manage=true`: ADMIN, every organization with counts) |
-| `POST` | `/api/organizations` | ADMIN (create; Configuration → Organizations) |
+| `POST` | `/api/organizations` | ADMIN (create; not offered in the UI while Joy Alukkas is the only organization) |
 | `PATCH` | `/api/organizations/[id]` | ADMIN (rename, activate, deactivate) |
-| `POST` | `/api/organizations/select` | ADMIN, IT_OPERATOR (choose the working organization) |
 | `GET` | `/api/settings/public` | public |
 | `GET` | `/api/settings` | ADMIN, IT_OPERATOR |
 | `PATCH` | `/api/settings` | ADMIN |

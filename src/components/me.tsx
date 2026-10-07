@@ -6,10 +6,8 @@ export interface Me {
   scopeName: string | null; locationId: string | null;
   /** Organisation name from Settings (the branding in the sidebar). */
   orgName: string;
-  /** The selected organization (head quarter) whose data every screen shows. */
+  /** The organization (head quarter, Joy Alukkas) whose data every screen shows. */
   organization: { id: string; name: string } | null;
-  organizations: { id: string; name: string }[];
-  canSwitchOrganization: boolean;
 }
 const Ctx = createContext<Me | null>(null);
 export const MeProvider = ({ me, children }: { me: Me; children: React.ReactNode }) => <Ctx.Provider value={me}>{children}</Ctx.Provider>;
