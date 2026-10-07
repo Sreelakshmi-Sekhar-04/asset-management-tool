@@ -3,30 +3,25 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/components/api';
 import { useMe } from '@/components/me';
-import { LocationSelect, UserSelect, useLocations, type Loc } from '@/components/pickers';
-import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useConfirm, useToast } from '@/components/ui';
+import { LocationFormModal, emptyLocationForm, type LocationForm } from '@/components/master-forms';
+import { useLocations, type Loc } from '@/components/pickers';
+import { Badge, Card, ErrorBox, PageHeader, Spinner, useConfirm, useToast } from '@/components/ui';
 
-// Every location sits under an organization (head quarter). Organizations themselves are created
-// under Configuration → Organizations, not here.
-const TYPES = ['REGION', 'STATE', 'BRANCH', 'SITE', 'OTHER'];
-type Form = { name: string; type: string; parentId: string; state: string; code: string; email: string; managerId: string };
 
 export default function LocationsPage() {
   const toast = useToast();
   const { confirm, node } = useConfirm();
   const me = useMe();
   const { data, error, reload } = useLocations(true, true);
-  const [edit, setEdit] = useState<{ id?: string; f: Form } | null>(null);
+  const [edit, setEdit] = useState<{ id?: string; f: LocationForm } | null>(null);
   const [filter, setFilter] = useState('');
   const open = (l?: Loc, parent?: Loc) => setEdit(l
     ? { id: l.id, f: { name: l.name, type: l.type, parentId: l.parentId ?? '', state: l.state ?? '', code: l.code ?? '', email: l.email ?? '', managerId: l.managerId ?? '' } }
-    : { f: { name: '', type: 'BRANCH', parentId: parent?.id ?? me.organization?.id ?? '', state: '', code: '', email: '', managerId: '' } });
+    : { f: emptyLocationForm({ parentId: parent?.id ?? me.organization?.id ?? '' }) });
   const toggle = async (l: Loc) => {
     if (l.active && !(await confirm(`Deactivate ${l.namePath}? Inactive locations can’t receive assets or transfers. History is kept.`))) return;
     try { await api(`/api/locations/${l.id}`, { method: 'PATCH', body: { active: !l.active } }); toast(l.active ? 'Deactivated' : 'Activated'); reload(); } catch (e) { toast((e as Error).message, 'err'); }
   };
-  const f = edit?.f;
-  const set = (p: Partial<Form>) => edit && setEdit({ ...edit, f: { ...edit.f, ...p } });
   const rows = (data ?? []).filter((l) => !filter || l.namePath.toLowerCase().includes(filter.toLowerCase()));
   return (
     <div className="space-y-4">
@@ -59,24 +54,7 @@ export default function LocationsPage() {
           </table></div>
         )}
       </Card>
-      <FormModal open={!!edit} onClose={() => setEdit(null)} title={edit?.id ? 'Edit location' : 'Add location'}
-        onSubmit={async () => {
-          const body = { name: f!.name, type: f!.type, parentId: f!.parentId || null, state: f!.state || null, code: f!.code || null, email: f!.email || null, managerId: f!.managerId || null };
-          if (edit!.id) await api(`/api/locations/${edit!.id}`, { method: 'PATCH', body }); else await api('/api/locations', { body });
-          toast('Saved'); reload();
-        }}>
-        {f && <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Name" required><input className="input" value={f.name} onChange={(e) => set({ name: e.target.value })} required /></Field>
-          <Field label="Type"><select className="input" value={f.type} onChange={(e) => set({ type: e.target.value })}>{TYPES.map((t) => <option key={t} value={t}>{t[0] + t.slice(1).toLowerCase()}</option>)}</select></Field>
-          <Field label="Parent" required hint={edit?.id ? 'Changing the parent moves this location and everything beneath it' : undefined}><LocationSelect value={f.parentId} onChange={(parentId) => set({ parentId })} placeholder="Choose the parent" all /></Field>
-          <Field label="State" hint="Set on a state node or branch; used to flag inter-state transfers"><input className="input" value={f.state} onChange={(e) => set({ state: e.target.value })} /></Field>
-          <Field label="Code"><input className="input" value={f.code} onChange={(e) => set({ code: e.target.value })} /></Field>
-          <Field label="Branch email" hint="Receives transfer notifications"><input className="input" type="email" value={f.email} onChange={(e) => set({ email: e.target.value })} /></Field>
-          <Field label="Location manager" className="sm:col-span-2" hint="Gives the second approval for transfers into this location, after an Administrator. Left empty, the manager of the location above it approves.">
-            <UserSelect value={f.managerId} onChange={(managerId) => set({ managerId })} placeholder="Same as the location above" />
-          </Field>
-        </div>}
-      </FormModal>
+      <LocationFormModal value={edit} onClose={() => setEdit(null)} onSaved={() => { toast('Saved'); reload(); }} />
     </div>
   );
 }

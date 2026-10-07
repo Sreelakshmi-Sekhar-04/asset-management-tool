@@ -180,11 +180,12 @@ export function Stat({ label, value, href, tone, hint }: { label: string; value:
 }
 
 export function useConfirm() {
-  const [state, setState] = useState<{ text: ReactNode; resolve: (v: boolean) => void } | null>(null);
-  const confirm = (text: ReactNode) => new Promise<boolean>((resolve) => setState({ text, resolve }));
+  const [state, setState] = useState<{ text: ReactNode; resolve: (v: boolean) => void; title?: ReactNode; okLabel?: string; danger?: boolean } | null>(null);
+  /** Asks for confirmation; `opts` can name the dialog and its button (e.g. "Remove"). */
+  const confirm = (text: ReactNode, opts: { title?: ReactNode; okLabel?: string; danger?: boolean } = {}) => new Promise<boolean>((resolve) => setState({ text, resolve, ...opts }));
   const node = (
-    <Modal open={!!state} onClose={() => { state?.resolve(false); setState(null); }} title="Please confirm"
-      footer={<><button className="btn" onClick={() => { state?.resolve(false); setState(null); }}>Cancel</button><button className="btn btn-primary" onClick={() => { state?.resolve(true); setState(null); }}>Confirm</button></>}>
+    <Modal open={!!state} onClose={() => { state?.resolve(false); setState(null); }} title={state?.title ?? 'Please confirm'}
+      footer={<><button className="btn" onClick={() => { state?.resolve(false); setState(null); }}>Cancel</button><button className={clsx('btn', state?.danger ? 'btn-danger' : 'btn-primary')} onClick={() => { state?.resolve(true); setState(null); }}>{state?.okLabel ?? 'Confirm'}</button></>}>
       <div className="text-sm">{state?.text}</div>
     </Modal>
   );

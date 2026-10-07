@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { api, useApi } from '@/components/api';
+import { DepartmentFormModal } from '@/components/master-forms';
 import type { Cat, Dept } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
@@ -66,10 +67,7 @@ export default function MasterDataPage() {
           ))}
         </>}
       </FormModal>
-      <FormModal open={!!dept} onClose={() => setDept(null)} title={dept?.id ? 'Rename department' : 'Add department'}
-        onSubmit={async () => { if (dept!.id) await api(`/api/departments/${dept!.id}`, { method: 'PATCH', body: { name: dept!.name } }); else await api('/api/departments', { body: { name: dept!.name } }); toast('Saved'); depts.reload(); }}>
-        {dept && <Field label="Name" required><input className="input" value={dept.name} onChange={(e) => setDept({ ...dept, name: e.target.value })} required /></Field>}
-      </FormModal>
+      <DepartmentFormModal value={dept} onClose={() => setDept(null)} onSaved={() => { toast('Saved'); depts.reload(); }} />
     </div>
   );
 }

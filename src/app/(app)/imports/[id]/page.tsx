@@ -8,10 +8,14 @@ import { IMPORT_TYPE, ImportStatus, RUNNING } from '@/components/import-status';
 import { importAssetColumns, MORE_FIELDS, OUT_LABEL, OUT_TONE, type ImportAssetRow, type RowEditor } from '@/components/import-asset-rows';
 import { CameraScanner } from '@/components/camera-scanner';
 import { DataTable, useListState } from '@/components/list';
-import { useCategories, useLocations } from '@/components/pickers';
+import { DepartmentFormModal, emptyLocationForm, LocationFormModal, type LocationForm } from '@/components/master-forms';
+import { useMe } from '@/components/me';
+import { useCategories, useDepartments, useLocations, type Loc } from '@/components/pickers';
+import { ROW_FILTERS } from '@/lib/import-row-status';
 import { Badge, Card, ErrorBox, Field, Modal, PageHeader, Spinner, Stat, useConfirm, useToast } from '@/components/ui';
 
-interface Job { id: string; type: string; mode: string; createMissing: boolean; fileName: string; status: string; totalRows: number; processedRows: number; counts: Record<string, number>; locationsToCreate: string[]; departmentsToCreate: string[]; warningReason: string | null; error: string | null; createdByName: string; createdAt: string; validatedAt: string | null; committedAt: string | null; reportPurgedAt: string | null }
+interface Preview { total: number; selected: number; importable: number; removed: number; warnings: number; selectedProblems: number; statuses: Record<string, number>; missingLocations: { value: string; rows: number }[]; missingDepartments: { value: string; rows: number }[] }
+interface Job { id: string; type: string; mode: string; createMissing: boolean; fileName: string; status: string; totalRows: number; processedRows: number; counts: Record<string, number>; locationsToCreate: string[]; departmentsToCreate: string[]; warningReason: string | null; error: string | null; createdByName: string; createdAt: string; validatedAt: string | null; committedAt: string | null; reportPurgedAt: string | null; preview?: Preview }
 type Row = ImportAssetRow;
 
 function Inner() {
@@ -26,18 +30,31 @@ function Inner() {
   const [err, setErr] = useState<unknown>(null);
   const running = job && RUNNING.includes(job.status);
   useEffect(() => { if (!running) return; const t = setInterval(reload, 2000); return () => clearInterval(t); }, [running, reload]);
-  const editor = useRowEditor(id, job?.type === 'ASSETS' && job.status === 'VALIDATED', () => { reload(); rows.reload(); });
+  const refresh = useCallback(() => { reload(); rows.reload(); }, [reload, rows]);
+  const editor = useRowEditor(id, job?.type === 'ASSETS' && job.status === 'VALIDATED', refresh);
+  // Ticks show at once; the stored selection follows.
+  const mark = (which: number[] | 'all', selected: boolean) => rows.setData((d) => d && { ...d, rows: d.rows.map((r) => !r.removed && (which === 'all' || which.includes(r.rowNumber)) ? { ...r, selected } : r) });
+  const actions = usePreviewActions(id, job?.type === 'ASSETS' && job.status === 'VALIDATED' ? job.preview ?? null : null, refresh, confirm, mark);
   if (error) return <ErrorBox error={error} />;
   if (!job) return <div className="flex justify-center py-20"><Spinner /></div>;
   const c = job.counts ?? {};
-  const committable = (c.CREATED ?? 0) + (c.UPDATED ?? 0) + (c.WARNING ?? 0);
+  const pv = job.type === 'ASSETS' ? job.preview : undefined;
+  const st = pv?.statuses ?? {};
+  // Asset imports import only the ticked, valid rows; other imports every valid row.
+  const committable = pv ? pv.importable : (c.CREATED ?? 0) + (c.UPDATED ?? 0) + (c.WARNING ?? 0);
+  const warnings = pv ? pv.warnings : c.WARNING ?? 0;
   const committed = job.status === 'COMMITTED';
   const verb = committed ? '' : ' (planned)';
 
   const confirmImport = async () => {
-    if (!(await confirm(`Confirm this import? ${c.CREATED} record(s) will be created and ${c.UPDATED} updated${c.WARNING ? `, plus ${c.WARNING} possible duplicate(s) you reviewed` : ''}, using the values shown in the table, including your corrections. Invalid and duplicate rows are skipped. The data is re-checked first; if anything changed since the last check, nothing is applied.`))) return;
+    const skipped = pv ? pv.total - pv.importable : 0;
+    const text = pv
+      ? <>Import {pv.importable} selected row(s) now? They are checked once more first, and the values shown in the table are used, including your corrections.{skipped > 0 && <> The other {skipped} row(s) are not imported: rows that are not ticked, duplicates and rows that still have problems.</>}{pv.removed > 0 && <> {pv.removed} removed row(s) are left out.</>}</>
+      : `Confirm this import? ${c.CREATED} record(s) will be created and ${c.UPDATED} updated${c.WARNING ? `, plus ${c.WARNING} possible duplicate(s) you reviewed` : ''}, using the values shown in the table, including your corrections. Invalid and duplicate rows are skipped. The data is re-checked first; if anything changed since the last check, nothing is applied.`;
+    if (!(await confirm(text, { title: 'Confirm and import', okLabel: `Import ${committable} row(s)` }))) return;
     setBusy(true); setErr(null);
-    try { await api(`/api/imports/${id}/confirm`, { body: { warningReason: reason || undefined } }); toast('Commit started'); reload(); } catch (e) { setErr(e); } finally { setBusy(false); }
+    try { await api(`/api/imports/${id}/confirm`, { body: { warningReason: reason || undefined, expected: pv ? pv.importable : undefined } }); toast('Import started'); reload(); }
+    catch (e) { setErr(e); refresh(); } finally { setBusy(false); }
   };
 
   return (
@@ -57,27 +74,60 @@ function Inner() {
       )}
       {job.error && <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800">{job.error}</div>}
 
-      {c.total !== undefined && (
+      {pv && job.status === 'VALIDATED' ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <Stat label="Valid · New" value={st.NEW ?? 0} tone="green" /><Stat label="Valid · Existing" value={st.EXISTING ?? 0} /><Stat label="Duplicate" value={st.DUPLICATE ?? 0} />
+          <Stat label="Possible duplicate" value={st.POSSIBLE_DUPLICATE ?? 0} tone={st.POSSIBLE_DUPLICATE ? 'amber' : undefined} />
+          <Stat label="Missing location" value={(st.MISSING_LOCATION ?? 0) + (st.MISSING_BOTH ?? 0)} tone={(st.MISSING_LOCATION ?? 0) + (st.MISSING_BOTH ?? 0) ? 'amber' : undefined} />
+          <Stat label="Missing department" value={(st.MISSING_DEPARTMENT ?? 0) + (st.MISSING_BOTH ?? 0)} tone={(st.MISSING_DEPARTMENT ?? 0) + (st.MISSING_BOTH ?? 0) ? 'amber' : undefined} />
+          <Stat label="Invalid" value={st.INVALID ?? 0} tone={st.INVALID ? 'red' : undefined} />
+          <Stat label="Selected to import" value={`${pv.importable} of ${pv.total}`} tone="green" hint={pv.removed ? `${pv.removed} removed` : undefined} />
+        </div>
+      ) : c.total !== undefined && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
           <Stat label={`New: created${verb}`} value={c.CREATED} tone="green" /><Stat label={`Existing: updated${verb}`} value={c.UPDATED} /><Stat label="Duplicate" value={c.UNCHANGED} />
           <Stat label="Possible duplicates to review" value={c.WARNING} tone={c.WARNING ? 'amber' : undefined} /><Stat label="Invalid" value={c.REJECTED} tone={c.REJECTED ? 'red' : undefined} />
+          {!!c.NOT_SELECTED && <Stat label="Valid but not selected (not imported)" value={c.NOT_SELECTED} />}
+          {!!pv?.removed && <Stat label="Removed from the import" value={pv.removed} />}
         </div>
       )}
 
       {job.status === 'VALIDATED' && (
         <Card title="Review, fix and confirm" actions={editor && <button className="btn btn-sm" disabled={busy || editor.editing !== null || editor.saving} onClick={editor.recheck}>{editor.saving && editor.editing === null && <Spinner className="h-3 w-3" />}Check again</button>}>
           <div className="space-y-3 text-sm">
-            {editor && <p className="text-slate-600">Nothing is imported yet. Click any cell in the table to correct it, or use <b>Scan</b> or <b>Enter manually</b> on a row with no serial number. Each saved row is checked again straight away, and the import uses the corrected values.</p>}
-            {editor && (c.REJECTED ?? 0) > 0 && <p className="text-red-800">{c.REJECTED} row(s) still have problems and will be skipped unless you fix them. <button className="underline" onClick={() => ls.set('outcome', 'REJECTED')}>Show them</button></p>}
+            {editor && <p className="text-slate-600">Nothing is imported yet. Click any cell in the table to correct it, or use <b>Scan</b> or <b>Enter manually</b> on a row with no serial number. Add a missing location or department from its row; each change checks the rows again straight away. Only the <b>ticked</b> rows that are valid are imported. <b>Delete</b> takes a row out of this import only; it never deletes an asset, a location or a department.</p>}
+            {pv && actions && (pv.missingLocations.length > 0 || pv.missingDepartments.length > 0) && (
+              <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
+                <b>Not found in the master data yet.</b> Add them here and the rows are checked again; nothing is created until you add it.
+                {pv.missingLocations.map((m) => {
+                  const plan = actions.locationPlan(m.value);
+                  return (
+                    <div key={`l:${m.value}`} className="flex flex-wrap items-center gap-2">
+                      <span>Location <b>{m.value}</b> · {m.rows} row(s){plan.more && <span className="text-amber-800">: add “{plan.name}”{plan.parentPath ? ` under ${plan.parentPath}` : ''} first</span>}</span>
+                      {actions.canAddLocation ? <button className="btn btn-sm" disabled={actions.busy || !!editor?.editing} onClick={() => actions.addLocation(m.value)}>{plan.more ? `Add ${plan.name} first` : 'Add location'}</button>
+                        : <span className="text-xs text-slate-600">Ask an Administrator to add it.</span>}
+                    </div>
+                  );
+                })}
+                {pv.missingDepartments.map((m) => (
+                  <div key={`d:${m.value}`} className="flex flex-wrap items-center gap-2">
+                    <span>Department <b>{m.value}</b> · {m.rows} row(s)</span>
+                    <button className="btn btn-sm" disabled={actions.busy || !!editor?.editing} onClick={() => actions.addDepartment(m.value)}>Add department</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {pv ? (pv.selectedProblems > 0 && <p className="text-red-800">{pv.selectedProblems} selected row(s) still have problems and will not be imported unless you fix them. <button className="underline" onClick={() => ls.set('outcome', 'REJECTED')}>Show them</button></p>)
+              : editor && (c.REJECTED ?? 0) > 0 && <p className="text-red-800">{c.REJECTED} row(s) still have problems and will be skipped unless you fix them. <button className="underline" onClick={() => ls.set('outcome', 'REJECTED')}>Show them</button></p>}
             {(job.locationsToCreate.length > 0 || job.departmentsToCreate.length > 0) && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
                 {job.locationsToCreate.length > 0 && <div><b>New locations that will be created:</b> {job.locationsToCreate.join(', ')}</div>}
                 {job.departmentsToCreate.length > 0 && <div><b>New departments that will be created:</b> {job.departmentsToCreate.join(', ')}</div>}
               </div>
             )}
-            {c.WARNING > 0 && <Field label={`Reason for accepting ${c.WARNING} duplicate warning(s)`} required><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded on each affected asset" /></Field>}
-            {committable === 0 ? <p className="text-slate-600">Nothing to import yet: every row is a duplicate or invalid.{editor ? ' Fix the invalid rows in the table below.' : ' Fix the invalid rows using the row report and upload again.'}</p>
-              : <button className="btn btn-primary" disabled={busy || !!editor?.editing || !!editor?.saving || (c.WARNING > 0 && !reason.trim())} onClick={confirmImport}>{busy && <Spinner className="h-3 w-3" />}Confirm and import {committable.toLocaleString('en-IN')} row(s)</button>}
+            {warnings > 0 && <Field label={`Reason for accepting ${warnings} duplicate warning(s)`} required><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Recorded on each affected asset" /></Field>}
+            {committable === 0 ? <p className="text-slate-600">{pv ? 'Nothing to import yet: no ticked row is valid. Tick the rows to import, or fix the rows that still have problems.' : `Nothing to import yet: every row is a duplicate or invalid.${editor ? ' Fix the invalid rows in the table below.' : ' Fix the invalid rows using the row report and upload again.'}`}</p>
+              : <button className="btn btn-primary" disabled={busy || !!editor?.editing || !!editor?.saving || !!actions?.busy || (warnings > 0 && !reason.trim())} onClick={confirmImport}>{busy && <Spinner className="h-3 w-3" />}Confirm and import {committable.toLocaleString('en-IN')} row(s)</button>}
             {editor?.editing != null && <p className="text-xs text-amber-800">Save or cancel your changes to row {editor.editing} first.</p>}
             <ErrorBox error={err} />
           </div>
@@ -88,12 +138,26 @@ function Inner() {
       {rows.data && (
         <>
           <div className="flex flex-wrap gap-1">
-            {['', 'CREATED', 'UPDATED', 'UNCHANGED', 'WARNING', 'REJECTED'].map((o) => (
+            {pv ? ROW_FILTERS.map((f) => {
+              const n = f.value === '' ? pv.total : f.value === 'REMOVED' ? pv.removed : (f.statuses ?? []).reduce((a, k) => a + (st[k] ?? 0), 0);
+              if (f.value === 'REMOVED' && !n && ls.get('outcome') !== 'REMOVED') return null;
+              return <button key={f.value} className={`btn btn-sm ${ls.get('outcome') === f.value ? 'btn-primary' : ''}`} onClick={() => ls.set('outcome', f.value)}>{f.label} ({n})</button>;
+            }) : ['', 'CREATED', 'UPDATED', 'UNCHANGED', 'WARNING', 'REJECTED'].map((o) => (
               <button key={o} className={`btn btn-sm ${ls.get('outcome') === o ? 'btn-primary' : ''}`} onClick={() => ls.set('outcome', o)}>{o ? OUT_LABEL[o] : 'All rows'}{o && c[o] !== undefined ? ` (${c[o]})` : ''}</button>
             ))}
           </div>
+          {pv && actions && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <b>{pv.selected.toLocaleString('en-IN')} of {pv.total.toLocaleString('en-IN')} row(s) selected</b>
+              <button className="btn btn-sm" disabled={actions.busy || actions.allSelected} onClick={() => actions.setAll(true)}>Select all</button>
+              <button className="btn btn-sm" disabled={actions.busy || !pv.selected} onClick={() => actions.setAll(false)}>Deselect all</button>
+              <button className="btn btn-sm text-red-700" disabled={actions.busy || !pv.selected || !!editor?.editing} onClick={actions.removeSelected}>Delete selected ({pv.selected})</button>
+              {actions.busy && <Spinner className="h-3 w-3" />}
+            </div>
+          )}
           <DataTable loading={rows.loading} rows={rows.data.rows} total={rows.data.total} page={ls.page} pageSize={ls.pageSize} onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))}
-            columns={job.type === 'ASSETS' ? importAssetColumns(editor ?? undefined) : [
+            empty={ls.get('outcome') ? 'No rows here.' : undefined}
+            columns={job.type === 'ASSETS' ? importAssetColumns(editor ?? undefined, actions ?? undefined) : [
               { key: 'rowNumber', header: 'Row', render: (r) => r.rowNumber },
               { key: 'outcome', header: 'Result', render: (r) => <Badge tone={OUT_TONE[r.outcome]}>{OUT_LABEL[r.outcome]}</Badge> },
               { key: 'messages', header: 'Reason', render: (r) => <span className="text-xs">{r.messages.join(' ')}</span> },
@@ -103,8 +167,101 @@ function Inner() {
         </>
       )}
       {editor?.dialogs}
+      {actions?.dialogs}
     </div>
   );
+}
+
+type Confirm = ReturnType<typeof useConfirm>['confirm'];
+
+/**
+ * Ticking rows, removing them from the batch, and adding a missing location or department from
+ * the preview. Every change is stored straight away and the rows are checked again, so the preview
+ * always shows what "Confirm" would import. Returns null when the import cannot be changed.
+ */
+function usePreviewActions(jobId: string, pv: Preview | null, onChanged: () => void, confirm: Confirm, mark: (which: number[] | 'all', selected: boolean) => void) {
+  const toast = useToast();
+  const me = useMe();
+  const locs = useLocations(false, true);
+  const depts = useDepartments();
+  const [busy, setBusy] = useState(false);
+  const [addLoc, setAddLoc] = useState<{ raw: string; plan: LocPlan; value: { f: LocationForm } } | null>(null);
+  const [addDept, setAddDept] = useState<{ raw: string } | null>(null);
+  if (!pv) return null;
+
+  const run = async (fn: () => Promise<unknown>, done?: string) => {
+    setBusy(true);
+    try { await fn(); if (done) toast(done); onChanged(); } catch (e) { toast((e as Error).message, 'err'); onChanged(); } finally { setBusy(false); }
+  };
+  const select = (body: { rows?: number[]; all?: boolean; selected: boolean }) => { mark(body.all ? 'all' : body.rows ?? [], body.selected); return run(() => api(`/api/imports/${jobId}/selection`, { body })); };
+  const remove = (body: { rows?: number[]; selected?: true; restore?: boolean }, done: string) => run(() => api(`/api/imports/${jobId}/remove`, { body }), done);
+  const revalidate = () => api(`/api/imports/${jobId}/revalidate`, { method: 'POST' });
+  const replace = (field: 'location' | 'department', from: string, to: string) => api(`/api/imports/${jobId}/replace`, { body: { field, from, to } });
+  const notice = 'Only the uploaded row is taken out of this import. No asset, location or department is deleted, and you can put it back from the Removed tab.';
+  const allSelected = pv.total > 0 && pv.selected === pv.total;
+
+  return {
+    busy, allSelected, someSelected: pv.selected > 0, canAddLocation: me.isAdmin,
+    toggleAll: () => select({ all: true, selected: !allSelected }),
+    setAll: (selected: boolean) => select({ all: true, selected }),
+    toggle: (r: ImportAssetRow) => select({ rows: [r.rowNumber], selected: !r.selected }),
+    remove: async (r: ImportAssetRow) => {
+      const valid = ['CREATED', 'UPDATED', 'WARNING'].includes(r.outcome);
+      if (!(await confirm(<>{valid && <p className="mb-2 font-medium text-amber-800">Row {r.rowNumber} is valid and would otherwise be imported.</p>}<p>{notice}</p></>, { title: `Remove row ${r.rowNumber} from the import?`, okLabel: 'Remove', danger: true }))) return;
+      await remove({ rows: [r.rowNumber] }, `Row ${r.rowNumber} removed from this import.`);
+    },
+    removeSelected: async () => {
+      if (!(await confirm(<p>Only these uploaded rows are taken out of this import. No asset, location or department is deleted, and you can put them back from the Removed tab.</p>, { title: `Remove ${pv.selected} selected row(s) from the import?`, okLabel: 'Remove', danger: true }))) return;
+      await remove({ selected: true }, `${pv.selected} row(s) removed from this import.`);
+    },
+    restore: (r: ImportAssetRow) => remove({ rows: [r.rowNumber], restore: true }, `Row ${r.rowNumber} is back in the import and was checked again.`),
+    locationPlan: (raw: string) => { const p = planLocation(raw, locs.data ?? []); return { name: p.name, parentPath: p.parent?.namePath ?? null, more: p.rest.length > 0 }; },
+    addLocation: (raw: string) => {
+      const plan = planLocation(raw, locs.data ?? []);
+      const parentId = plan.parent?.id ?? me.organization?.id ?? '';
+      const type = !plan.rest.length ? 'BRANCH' : plan.parent?.type === 'ORGANIZATION' || !plan.parent ? 'REGION' : plan.parent.type === 'REGION' ? 'STATE' : 'OTHER';
+      setAddLoc({ raw, plan, value: { f: emptyLocationForm({ name: plan.name, parentId, type }) } });
+    },
+    addDepartment: (raw: string) => setAddDept({ raw }),
+    dialogs: (
+      <>
+        <LocationFormModal value={addLoc?.value ?? null} onClose={() => setAddLoc(null)}
+          intro={addLoc && <p className="text-sm text-slate-600">The file says <b>{addLoc.raw}</b>. {addLoc.plan.rest.length ? <>“{addLoc.plan.name}” is needed first, then {addLoc.plan.rest.join(' / ')} under it.</> : 'Check the parent and any other details, then save.'} The preview stays open and its rows are checked again.</p>}
+          onSaved={async (saved) => {
+            const { raw, plan } = addLoc!;
+            locs.reload();
+            // The file's value still finds the new location unless the name or the place in the tree was changed.
+            const same = saved.name.toLowerCase() === plan.name.toLowerCase() && (!plan.parent || saved.parentId === plan.parent.id);
+            await run(() => same ? revalidate() : replace('location', raw, [saved.namePath, ...plan.rest].join(' / ')),
+              plan.rest.length ? `Location ${saved.name} added. Now add ${plan.rest[0]}.` : `Location ${saved.name} added and the rows checked again.`);
+          }} />
+        <DepartmentFormModal value={addDept ? { name: addDept.raw } : null} onClose={() => setAddDept(null)}
+          intro={addDept && <p className="text-sm text-slate-600">The file says <b>{addDept.raw}</b>. The department is added to {me.organization?.name ?? 'this organization'}; the preview stays open and its rows are checked again.</p>}
+          onSaved={async (saved) => {
+            const raw = addDept!.raw;
+            depts.reload();
+            await run(() => saved.name.toLowerCase() === raw.toLowerCase() ? revalidate() : replace('department', raw, saved.name), `Department ${saved.name} added and the rows checked again.`);
+          }} />
+      </>
+    ),
+  };
+}
+
+type LocPlan = { name: string; parent: Loc | null; rest: string[] };
+/**
+ * For a location the file names but the master data lacks: the deepest part of its path that
+ * exists (the parent), the first missing part (added first), and what remains below it.
+ * "South India/Goa/Panaji" with no Goa → add Goa under South India, then Panaji under Goa.
+ */
+function planLocation(raw: string, locs: Loc[]): LocPlan {
+  const parts = raw.split(/[/\\>]/).map((x) => x.trim()).filter(Boolean);
+  const active = locs.filter((l) => l.active);
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const p = parts.slice(0, i).join(' / ').toLowerCase();
+    const hits = active.filter((l) => l.namePath.toLowerCase() === p || l.namePath.toLowerCase().endsWith(' / ' + p));
+    if (hits.length === 1) return { name: parts[i], parent: hits[0], rest: parts.slice(i + 1) };
+  }
+  return { name: parts[0] ?? raw, parent: null, rest: parts.slice(1) };
 }
 
 /**
@@ -116,6 +273,7 @@ function useRowEditor(jobId: string, enabled: boolean, onSaved: () => void) {
   const toast = useToast();
   const cats = useCategories();
   const locs = useLocations();
+  const depts = useDepartments();
   const [row, setRow] = useState<ImportAssetRow | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [focus, setFocus] = useState<string | null>(null);
@@ -150,7 +308,8 @@ function useRowEditor(jobId: string, enabled: boolean, onSaved: () => void) {
 
   const editor: RowEditor & { recheck: () => void; dialogs: React.ReactNode } = {
     editing: row?.rowNumber ?? null, draft, focus, saving,
-    start: (r, f) => { setRow(r); setDraft({ ...r.data }); setFocus(f ?? 'serialnumber'); setErr(null); },
+    // Locations and departments may have been added from the preview since the lists were loaded.
+    start: (r, f) => { setRow(r); setDraft({ ...r.data }); setFocus(f ?? 'serialnumber'); setErr(null); locs.reload(); depts.reload(); },
     set: (k, v) => setDraft((d) => ({ ...d, [k]: v })),
     cancel: () => { setRow(null); setDraft({}); setMore(false); setErr(null); },
     save: () => {
@@ -163,6 +322,7 @@ function useRowEditor(jobId: string, enabled: boolean, onSaved: () => void) {
     more: () => setMore(true),
     categories: (cats.data ?? []).filter((c) => c.active).map((c) => c.name),
     locations: (locs.data ?? []).filter((l) => l.active).map((l) => l.namePath),
+    departments: (depts.data ?? []).filter((d) => d.active).map((d) => d.name),
     recheck: async () => {
       setSaving(true);
       try { await api(`/api/imports/${jobId}/revalidate`, { method: 'POST' }); toast('Checked again.'); onSaved(); }

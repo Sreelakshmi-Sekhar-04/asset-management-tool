@@ -37,7 +37,7 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
     if (!f) { setErr(new Error('Choose a CSV or Excel file.')); return; }
     setBusy(true); setErr(null);
     const form = new FormData();
-    form.set('file', f); form.set('type', type); form.set('createMissing', String(createMissing));
+    form.set('file', f); form.set('type', type); form.set('createMissing', String(type === 'EMPLOYEES' && createMissing));
     try { const j = await api<{ id: string }>('/api/imports', { form }); toast('Uploaded. The dry run has started.'); router.push(`/imports/${j.id}`); }
     catch (x) { setErr(x); } finally { setBusy(false); }
   };
@@ -57,8 +57,9 @@ export function ImportPanel({ assetsOnly = false }: { assetsOnly?: boolean }) {
             <Field label="File (.csv or .xlsx, up to 20,000 rows)"><input ref={file} type="file" accept=".csv,.xlsx" className="input" /></Field>
             <div className="flex items-end"><button className="btn btn-primary w-full" disabled={busy}>{busy && <Spinner className="h-3 w-3" />}Upload and dry run</button></div>
           </div>
-          {type !== 'BRANCH_USERS' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />Create locations and departments that don’t exist yet (listed in the dry run before you confirm)</label>}
-          {assetsOnly && <p className="text-xs text-slate-500">Each row is matched against the register by serial number, then legacy tag: new assets are created, existing ones updated, and rows already in the register with the same details are shown as duplicates. In the preview you can correct any row, and scan or type missing serial numbers, before you confirm.</p>}
+          {/* Asset imports never create master data: a missing location or department is added from the preview. */}
+          {type === 'EMPLOYEES' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />Create locations and departments that don’t exist yet (listed in the dry run before you confirm)</label>}
+          {assetsOnly && <p className="text-xs text-slate-500">Each row is matched against the register by serial number, then legacy tag: new assets are created, existing ones updated, and rows already in the register with the same details are shown as duplicates. In the preview you can correct any row, scan or type missing serial numbers, add a location or department that does not exist yet, remove rows and choose which rows to import, before you confirm.</p>}
           <div className="flex flex-wrap gap-2 text-sm">
             Template: <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=xlsx`)}>Excel</button>
             <button type="button" className="underline" onClick={() => download(`/api/imports/template?type=${type}&format=csv`)}>CSV</button>
