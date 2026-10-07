@@ -38,9 +38,9 @@ const int = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 const addDays = (s: string, n: number) => ymd(new Date(new Date(`${s}T00:00:00Z`).getTime() + n * 86_400_000));
 
-// Kerala only: one region and one state, as in the everyday demo seed, with fifteen branches.
+// South India only (Kerala), as in the everyday demo seed, with fifteen branches.
 const REGIONS: Record<string, Record<string, string[]>> = {
-  South: { Kerala: ['Kochi Kakkanad', 'Kochi MG Road', 'Thiruvananthapuram', 'Kollam', 'Pathanamthitta', 'Kozhikode', 'Malappuram', 'Kannur', 'Thrissur', 'Palakkad', 'Kochi Edappally', 'Alappuzha', 'Kottayam', 'Kasaragod', 'Kalpetta'] },
+  'South India': { Kerala: ['Kochi Kakkanad', 'Kochi MG Road', 'Thiruvananthapuram', 'Kollam', 'Pathanamthitta', 'Kozhikode', 'Malappuram', 'Kannur', 'Thrissur', 'Palakkad', 'Kochi Edappally', 'Alappuzha', 'Kottayam', 'Kasaragod', 'Kalpetta'] },
 };
 
 const CATALOGUE = [
