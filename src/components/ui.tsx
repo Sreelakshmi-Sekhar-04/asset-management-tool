@@ -80,13 +80,18 @@ export function Empty({ children }: { children: ReactNode }) {
 
 export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass inline onClose functions, so keep the latest in a ref: the effect below must run only when
+  // the dialog opens, otherwise every re-render (each keystroke in a field) steals focus back.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
     document.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('input,select,textarea,button')?.focus();
+    const root = ref.current;
+    (root?.querySelector<HTMLElement>('input:not([type=hidden]),select,textarea') ?? root?.querySelector<HTMLElement>('button'))?.focus();
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
