@@ -6,7 +6,7 @@
  *
  * Deletes ALL data (users, assets, employees, locations, transfers, audit log, history …)
  * from the database in DATABASE_URL, then creates 5 of each through the application's own
- * services: 3 users · 5 Kerala branches · 5 departments · 5 categories · 5 employees · 5 assets
+ * services: 5 people (3 sign-ins) · 5 Kerala branches · 5 departments · 5 categories · 5 assets
  * (each with a warranty, so 5 renewables), all in the Joy Alukkas organization, plus a little
  * assignment and transfer history.
  * Side records the services write for those (movements, audit entries, notifications) remain.
@@ -15,7 +15,7 @@
  * and the Asset ID counters, so new IDs continue after the old ones and a printed label can
  * never point at a different asset. Uploaded files under STORAGE_DIR are not touched.
  *
- * All five accounts share one password: SEED_DEMO_PASSWORD, or the development default below.
+ * All three sign-ins share one password: SEED_DEMO_PASSWORD, or the development default below.
  * Refuses to run without --yes, and when NODE_ENV=production unless ALLOW_DEMO_SEED=true.
  */
 import { prisma } from '@/lib/db';

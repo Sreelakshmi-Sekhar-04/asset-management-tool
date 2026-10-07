@@ -344,9 +344,16 @@ export async function getRequest(actor: Actor, id: string) {
   const userIds = r.tasks.map((x) => x.approverUserId).filter((x): x is string => !!x);
   const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
   const names = new Map(users.map((u) => [u.id, u.name]));
+  // A role step names its members when there are only a few, so the screen shows who approves.
+  const roleNames = new Map<Role, string | null>();
+  for (const role of new Set(r.tasks.filter((x) => x.approverType === 'ROLE' && x.approverRole).map((x) => x.approverRole!))) {
+    const ids = await approverUserIds(prisma, { approverType: 'ROLE', approverUserId: null, approverRole: role });
+    const members = ids.length && ids.length <= 3 ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { name: true }, orderBy: { name: 'asc' } }) : [];
+    roleNames.set(role, members.length ? members.map((u) => u.name).join(', ') : null);
+  }
   return {
     ...r,
-    tasks: r.tasks.map((x) => ({ ...x, approverName: x.approverUserId ? names.get(x.approverUserId) : null })),
+    tasks: r.tasks.map((x) => ({ ...x, approverName: x.approverUserId ? names.get(x.approverUserId) : x.approverRole ? roleNames.get(x.approverRole) ?? null : null })),
     canAct: r.status === 'PENDING' && r.tasks.some((x) => x.stepOrder === r.currentOrder && canActOnTask(actor, r, x)),
     canCancel: r.status === 'PENDING' && (r.initiatorId === actor.id || actor.role === 'ADMIN') && !r.tasks.some((x) => x.decidedAt),
   };

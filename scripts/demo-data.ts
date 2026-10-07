@@ -4,7 +4,10 @@
  * quickly and every screen is readable:
  *
  *   1 organization, Joy Alukkas (the head quarter)  ·  5 locations (branches under it)
- *   5 departments  ·  5 categories  ·  5 employees  ·  5 assets  ·  3 users  ·  5 warranty renewals
+ *   5 departments  ·  5 categories  ·  5 assets  ·  5 warranty renewals
+ *   5 people (employees), 3 of whom sign in: the Kochi MG Road branch manager (Administrator,
+ *   first transfer approval), the Trivandrum branch manager (second approval for transfers into
+ *   Trivandrum) and an IT operator who raises transfers
  *
  * Records are created through the application's own services, so each one carries its
  * movements and audit entries, and the demo history includes assignments and a transfer made
@@ -14,7 +17,7 @@
 import { prisma } from '@/lib/db';
 import { todayIST } from '@/lib/format';
 import { SYSTEM_ACTOR, type Actor } from '@/server/actor';
-import { actorForUser, decide } from '@/server/services/approvals';
+import { actorForUser } from '@/server/services/approvals';
 import { createAsset } from '@/server/services/assets';
 import { createEmployee } from '@/server/services/employees';
 import { assignAsset } from '@/server/services/lifecycle';
@@ -31,14 +34,15 @@ export async function loadDemoData(opts: { actorName: string; adminEmail?: strin
   const today = todayIST();
   const sys: Actor = { ...SYSTEM_ACTOR, name: opts.actorName };
 
-  // ── The organization (head quarter) and its five branches ──
+  // ── The organization (head quarter) and its five branches. Kochi MG Road is the demo's
+  //    "current" branch; Trivandrum is where the transfer demo sends assets. ──
   const org = await createLocation(sys, { name: 'Joy Alukkas', type: 'ORGANIZATION', state: 'Kerala', parentId: null, code: 'JA-HQ' });
   const branch = (name: string, code: string) =>
     createLocation(sys, { name, type: 'BRANCH', state: 'Kerala', parentId: org.id, code, email: null });
-  const thrissur = await branch('Thrissur', 'BR01');
+  await branch('Thrissur', 'BR01');
   const kochi = await branch('Kochi MG Road', 'BR02');
-  const kozhikode = await branch('Kozhikode', 'BR03');
-  const tvm = await branch('Thiruvananthapuram', 'BR04');
+  await branch('Kozhikode', 'BR03');
+  const tvm = await branch('Trivandrum', 'BR04');
   await branch('Kannur', 'BR05');
 
   // ── 5 departments of the organization; 5 categories, shared master data ──
@@ -50,33 +54,38 @@ export async function loadDemoData(opts: { actorName: string; adminEmail?: strin
     cats[name] = (await createCategory(sys, { name, serialRequired })).id;
   }
 
-  // ── 5 employees ──
-  const emp = (code: string, name: string, dept: string, locationId: string, email?: string) =>
-    createEmployee(asOrg, { employeeCode: code, name, email: email ?? `${name.toLowerCase().replace(/\s+/g, '.')}@${DOMAIN}`, departmentId: depts[dept], locationId });
-  const adminEmail = opts.adminEmail ?? `admin@${DOMAIN}`;
-  const adminName = opts.adminName ?? 'Asha Menon';
-  const eAdmin = await emp('EMP1001', adminName, 'IT', thrissur.id, adminEmail);
-  const eIt = await emp('EMP1002', 'Deepak Nambiar', 'IT', kochi.id, `it@${DOMAIN}`);
-  const e1 = await emp('EMP1003', 'Priya Nair', 'Operations', thrissur.id, `br01@${DOMAIN}`);
-  const e2 = await emp('EMP1004', 'Rohan Menon', 'Sales', kozhikode.id);
-  await emp('EMP1005', 'Ananya Pillai', 'Human Resources', tvm.id);
+  // ── Exactly 5 people. Users and employees are one record per person: an employee, plus a
+  //    sign-in for the three who use the application. The two branch managers approve transfers:
+  //      Arun Mathew   Branch Manager, Kochi MG Road  Administrator  1st approval (admin manager)
+  //      Lakshmi Varma Branch Manager, Trivandrum     Branch user    2nd approval (location manager)
+  //      Deepak Nambiar IT executive, Kochi MG Road   IT Operator    raises the transfers
+  //      Rohan Menon   Sales executive, Kochi         no sign-in     asset holder
+  //      Ananya Pillai HR executive, Trivandrum       no sign-in     asset holder ──
+  const emp = (code: string, name: string, dept: string, locationId: string, email: string, managerId?: string) =>
+    createEmployee(asOrg, { employeeCode: code, name, email, departmentId: depts[dept], locationId, managerId });
+  const mail = (name: string) => `${name.toLowerCase().replace(/\s+/g, '.')}@${DOMAIN}`;
+  const adminName = opts.adminName ?? 'Arun Mathew';
+  const adminEmail = opts.adminEmail ?? mail(adminName);
+  const eArun = await emp('JA1001', adminName, 'Operations', kochi.id, adminEmail);
+  const eLakshmi = await emp('JA1002', 'Lakshmi Varma', 'Operations', tvm.id, mail('Lakshmi Varma'));
+  const eDeepak = await emp('JA1003', 'Deepak Nambiar', 'IT', kochi.id, mail('Deepak Nambiar'), eArun.id);
+  const eRohan = await emp('JA1004', 'Rohan Menon', 'Sales', kochi.id, mail('Rohan Menon'), eArun.id);
+  const eAnanya = await emp('JA1005', 'Ananya Pillai', 'Human Resources', tvm.id, mail('Ananya Pillai'), eLakshmi.id);
 
-  // ── 3 users, one per role, each linked to their employee record ──
   const mkUser = (email: string, name: string, role: 'ADMIN' | 'IT_OPERATOR' | 'BRANCH_USER', employeeId: string, locationId: string | null = null) =>
     createUser(sys, { email, name, role, locationId, employeeId, password: DEMO_PASSWORD, sendInvite: false });
-  const admin1 = await mkUser(adminEmail, adminName, 'ADMIN', eAdmin.id);
-  const it1 = await mkUser(`it@${DOMAIN}`, 'Deepak Nambiar', 'IT_OPERATOR', eIt.id);
-  const br1 = await mkUser(`br01@${DOMAIN}`, 'Priya Nair', 'BRANCH_USER', e1.id, thrissur.id);
-  const it = await actorForUser(prisma, it1.id, org.id);
-  const admin = await actorForUser(prisma, admin1.id, org.id);
-  const priya = await actorForUser(prisma, br1.id, org.id);
+  const arun = await mkUser(adminEmail, adminName, 'ADMIN', eArun.id);
+  const lakshmi = await mkUser(mail('Lakshmi Varma'), 'Lakshmi Varma', 'BRANCH_USER', eLakshmi.id, tvm.id);
+  const deepak = await mkUser(mail('Deepak Nambiar'), 'Deepak Nambiar', 'IT_OPERATOR', eDeepak.id);
+  const it = await actorForUser(prisma, deepak.id, org.id);
 
-  // ── Location managers give the second transfer approval: Priya for Thrissur, the
-  //    administrator for every other branch (set on the organization, which they inherit) ──
-  await updateLocation(sys, thrissur.id, { managerId: br1.id });
-  await updateLocation(sys, org.id, { managerId: admin1.id });
+  // ── Location managers give the second transfer approval: Lakshmi for Trivandrum, Arun for
+  //    Kochi MG Road and, through the organization, for every other branch ──
+  await updateLocation(sys, tvm.id, { managerId: lakshmi.id });
+  await updateLocation(sys, kochi.id, { managerId: arun.id });
+  await updateLocation(sys, org.id, { managerId: arun.id });
 
-  // ── 5 assets across the branches ──
+  // ── 5 assets: four at Kochi MG Road, one at Trivandrum ──
   const mkAsset = async (cat: string, make: string, model: string, serial: string, locationId: string, cost: number, warrantyDays: number, hostname: string | null = null) => {
     const res = await createAsset(it, {
       categoryId: cats[cat], make, model, serialNumber: serial, hostname, locationId,
@@ -86,24 +95,18 @@ export async function loadDemoData(opts: { actorName: string; adminEmail?: strin
     if (!('asset' in res) || !res.asset) throw new Error(`Could not create the ${cat} asset.`);
     return res.asset.id;
   };
-  const laptop = await mkAsset('Laptop', 'Dell', 'Latitude 5440', 'DELAT100001', thrissur.id, 78000, 300, 'BR01-LT-001');
-  await mkAsset('Desktop', 'HP', 'ProDesk 400 G9', 'HPPRO100002', thrissur.id, 55000, 25);
+  const laptop = await mkAsset('Laptop', 'Dell', 'Latitude 5440', 'DELAT100001', kochi.id, 78000, 300, 'BR02-LT-001');
+  await mkAsset('Desktop', 'HP', 'ProDesk 400 G9', 'HPPRO100002', kochi.id, 55000, 25, 'BR02-DT-001');
   const printer = await mkAsset('Printer', 'HP', 'LaserJet Pro M404dn', 'HPLAS100004', kochi.id, 24000, -20, 'BR02-PR-001');
-  const monitor = await mkAsset('Monitor', 'Dell', 'P2422H', 'DEP24100003', kozhikode.id, 16500, 700);
-  const phone = await mkAsset('Mobile phone', 'Samsung', 'Galaxy A54', 'SAGAL100005', kozhikode.id, 36000, 120);
+  await mkAsset('Monitor', 'Dell', 'P2422H', 'DEP24100003', kochi.id, 16500, 700);
+  const phone = await mkAsset('Mobile phone', 'Samsung', 'Galaxy A54', 'SAGAL100005', tvm.id, 36000, 120);
 
-  // ── History, made the way the asset register makes it ──
-  // Assigned to an employee.
-  await assignAsset(it, laptop, { holder: { type: 'EMPLOYEE', id: e1.id }, remarks: 'Demo data' });
-  await assignAsset(it, phone, { holder: { type: 'EMPLOYEE', id: e2.id }, remarks: 'Demo data' });
-  // Assigned to a location, which is a transfer: the printer moves to Thrissur once the
-  // administrator and then Thrissur's manager (Priya) have approved it.
-  const moved = await assignAsset(it, printer, { holder: { type: 'LOCATION', id: thrissur.id }, remarks: 'Moved to Thrissur' }) as { pendingApproval: { id: string } };
-  await decide(admin, moved.pendingApproval.id, 'APPROVE', 'Approved');
-  await decide(priya, moved.pendingApproval.id, 'APPROVE', 'Received at Thrissur');
-  // A transfer still waiting for the administrator, so the Transfer status column shows both.
-  await assignAsset(it, monitor, { holder: { type: 'LOCATION', id: thrissur.id }, remarks: 'Extra screen for the Thrissur counter' });
-  // The desktop stays in stock, so there is something to assign while trying the app.
+  // ── History, made the way the asset register makes it. Nothing is approved here: ──
+  await assignAsset(it, laptop, { holder: { type: 'EMPLOYEE', id: eRohan.id }, remarks: 'Demo data' });
+  await assignAsset(it, phone, { holder: { type: 'EMPLOYEE', id: eAnanya.id }, remarks: 'Demo data' });
+  // A transfer from Kochi MG Road to Trivandrum, waiting for Arun (1st) and then Lakshmi (2nd).
+  await assignAsset(it, printer, { holder: { type: 'LOCATION', id: tvm.id }, remarks: 'Printer for the Trivandrum billing counter' });
+  // The desktop and monitor stay in stock at Kochi MG Road, ready to assign or transfer.
 
   const counts = {
     organizations: await prisma.location.count({ where: { parentId: null } }),
@@ -118,7 +121,8 @@ export async function loadDemoData(opts: { actorName: string; adminEmail?: strin
 
 export function printSignIns(adminEmail: string) {
   console.log(`\nDEVELOPMENT ONLY — sign-ins (password: ${process.env.SEED_DEMO_PASSWORD ? '$SEED_DEMO_PASSWORD' : DEMO_PASSWORD}):`);
-  console.log(`  Administrator  ${adminEmail}`);
-  console.log(`  IT Operator    it@${DOMAIN}`);
-  console.log(`  Branch user    br01@${DOMAIN} (Thrissur, Joy Alukkas; approves transfers into Thrissur)`);
+  console.log(`  Administrator  ${adminEmail}  (Branch Manager, Kochi MG Road; 1st transfer approval)`);
+  console.log(`  Branch user    lakshmi.varma@${DOMAIN}  (Branch Manager, Trivandrum; 2nd approval for transfers into Trivandrum)`);
+  console.log(`  IT Operator    deepak.nambiar@${DOMAIN}  (IT, Kochi MG Road; raises transfers from the Asset Register)`);
+  console.log('  Rohan Menon (Kochi MG Road) and Ananya Pillai (Trivandrum) are employees without a sign-in.');
 }

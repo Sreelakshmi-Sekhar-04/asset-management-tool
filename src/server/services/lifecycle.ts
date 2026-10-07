@@ -401,7 +401,9 @@ export async function bulkAssign(actor: Actor, input: unknown) {
     const released = isTransfer ? ok.filter((a) => { const h = holderOf(a); return h && h.type !== 'LOCATION'; }).length : 0;
     // Every transfer waits for two approvals; the check step names who gives them.
     const manager = isTransfer && ok.length ? await locationManager(t, to!.id) : null;
-    const approvals = manager ? ['Admin manager: any Administrator', `Location manager: ${manager.name} (${manager.locationName})`] : undefined;
+    const admins = manager ? (await t.user.findMany({ where: { role: 'ADMIN', active: true }, select: { name: true }, orderBy: { name: 'asc' }, take: 4 })).map((u) => u.name) : [];
+    const adminLabel = admins.length && admins.length <= 3 ? admins.join(' or ') : 'any Administrator';
+    const approvals = manager ? [`Admin manager: ${adminLabel}`, `Location manager: ${manager.name} (${manager.locationName})`] : undefined;
     const result = { mode: isTransfer ? ('TRANSFER' as const) : ('ASSIGN' as const), holder: name, selected: assets.length, skipped, failed, released, approvals };
     if (data.dryRun) return { ...result, assignable: ok.length, assigned: 0 };
     if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be ${verb} to ${name}. Nothing was changed.`, [...failed, ...skipped]);
