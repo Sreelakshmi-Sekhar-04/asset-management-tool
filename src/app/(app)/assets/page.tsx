@@ -11,7 +11,6 @@ import { Dash, HolderCell, LocationCell, useAssetColumnFilters, WarrantyCell } f
 import { ActiveFilters } from '@/components/column-filter';
 import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
-import { RegisterAssetDialog } from '@/components/register-options';
 import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/components/ui';
 
 export interface AssetRow {
@@ -29,7 +28,6 @@ export default function AssetRegister() {
   const [bulk, setBulk] = useState<'' | 'REPAIR' | 'REPAIR_DONE' | 'RETIRE' | 'CHECK_IN'>('');
   const [reason, setReason] = useState('');
   const [disposal, setDisposal] = useState('SCRAPPED');
-  const [registerOpen, setRegisterOpen] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const total = data?.total ?? 0;
@@ -85,7 +83,7 @@ export default function AssetRegister() {
       <PageHeader title="Asset register" subtitle={me.isBranch ? `Assets at ${me.scopeName}` : me.organization ? `Assets of ${me.organization.name}` : undefined}
         actions={<>
           <Link href="/scan" className="btn">Scan asset</Link>
-          {me.isIT && <button className="btn btn-primary" onClick={() => setRegisterOpen(true)}>Register asset</button>}
+          {me.isIT && <Link href="/assets/new" className="btn btn-primary">+ Create asset</Link>}
         </>} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -104,7 +102,6 @@ export default function AssetRegister() {
         onPage={(p) => ls.setMany({ page: String(p) }, false)} onPageSize={(n) => ls.set('pageSize', String(n))} onSort={(k, d) => ls.setMany({ sort: k, dir: d })}
         selection={sel} onSelection={setSel} empty="No assets match these filters."
         toolbar={<ActiveFilters chips={chips} onClearAll={ls.clear} right={<SavedFiltersMenu page="assets" query={ls.query} onApply={(q) => router.replace(`/assets?${q}`)} />} />} />
-      <RegisterAssetDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
       <BulkAssignDialog open={assignOpen} onClose={() => setAssignOpen(false)} count={count} selection={selPayload}
         onDone={(r) => { toast(bulkAssignMessage(r)); setSel(emptySelection()); reload(); }} />
       <PrintLabelsDialog open={labelsOpen} onClose={() => setLabelsOpen(false)} assetIds={sel.mode === 'ids' ? [...sel.ids] : []} />
