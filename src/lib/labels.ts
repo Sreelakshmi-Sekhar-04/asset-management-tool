@@ -17,12 +17,20 @@ export const MOVEMENT_LABEL: Record<string, string> = {
   TRANSFER_RECEIVED: 'Transfer received', TRANSFER_NOT_RECEIVED: 'Transfer not received', TRANSFERRED: 'Transferred',
   CORRECTION: 'Correction',
 };
-/** Assign covers transfers too: a transfer is an assignment to a location. */
+/**
+ * Actions an approval policy can gate. Transfers (assets assigned to a location) are not here:
+ * they always need an Administrator and then the destination's location manager.
+ */
 export const APPROVAL_ACTION_LABEL: Record<string, string> = {
-  ASSET_CREATE: 'Asset create', ASSIGN: 'Assign / transfer', CHECK_IN: 'Check-in', RETIRE: 'Retire', STATUS_CHANGE: 'Repair / status change',
+  ASSET_CREATE: 'Asset create', ASSIGN: 'Assign', CHECK_IN: 'Check-in', RETIRE: 'Retire', STATUS_CHANGE: 'Repair / status change',
 };
-/** Historical label, for requests raised by the retired transfer workflow. */
-export const HISTORIC_ACTION_LABEL: Record<string, string> = { ...APPROVAL_ACTION_LABEL, TRANSFER: 'Transfer (historical)' };
+/** Every action a request can carry, transfers included. */
+export const HISTORIC_ACTION_LABEL: Record<string, string> = { ...APPROVAL_ACTION_LABEL, TRANSFER: 'Transfer' };
+/** The asset register's Transfer status column. */
+export const ASSET_TRANSFER_STATUS_LABEL: Record<string, string> = {
+  NONE: 'No transfer', PENDING_ADMIN: 'Pending admin approval', PENDING_LOCATION_MANAGER: 'Pending location manager approval',
+  APPROVED: 'Transferred', REJECTED: 'Transfer rejected',
+};
 export const RENEWABLE_TYPE_LABEL: Record<string, string> = {
   WARRANTY: 'Warranty', LICENCE: 'Licence', SUBSCRIPTION: 'Subscription', AMC: 'AMC', CALIBRATION: 'Calibration',
   INSURANCE: 'Insurance', CERTIFICATE: 'Certificate', OTHER: 'Other',

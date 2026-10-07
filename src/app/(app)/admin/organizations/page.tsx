@@ -2,10 +2,11 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { api, useApi } from '@/components/api';
+import { UserSelect } from '@/components/pickers';
 import { Badge, Card, ErrorBox, Field, FormModal, PageHeader, Spinner, useToast } from '@/components/ui';
 
-type Org = { id: string; name: string; active: boolean; locations: number; employees: number; assets: number };
-type Form = { id?: string; name: string; active: boolean };
+type Org = { id: string; name: string; active: boolean; managerName: string | null; managerId: string | null; locations: number; employees: number; assets: number };
+type Form = { id?: string; name: string; active: boolean; managerId: string };
 
 /**
  * Configuration → Organizations. The application currently works with one organization, Joy
@@ -26,21 +27,22 @@ export default function OrganizationsPage() {
       <Card bodyClass="p-0">
         {!data ? <div className="flex justify-center py-10"><Spinner /></div> : (
           <div className="table-wrap"><table className="tbl">
-            <thead><tr><th>Organization</th><th>Status</th><th>Locations</th><th>Employees</th><th>Assets</th><th /></tr></thead>
+            <thead><tr><th>Organization</th><th>Status</th><th>Location manager</th><th>Locations</th><th>Employees</th><th>Assets</th><th /></tr></thead>
             <tbody>
               {data.map((o) => (
                 <tr key={o.id} className={o.active ? '' : 'text-slate-400'}>
                   <td className="font-medium">{o.name}</td>
                   <td>{o.active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</td>
+                  <td className="text-xs">{o.managerName ?? <span className="text-slate-400">Not set</span>}</td>
                   <td>{o.locations}</td>
                   <td>{o.employees}</td>
                   <td>{o.assets}</td>
                   <td className="whitespace-nowrap text-right">
-                    <button className="btn btn-sm btn-ghost" onClick={() => setEdit({ id: o.id, name: o.name, active: o.active })}>Edit</button>
+                    <button className="btn btn-sm btn-ghost" onClick={() => setEdit({ id: o.id, name: o.name, active: o.active, managerId: o.managerId ?? '' })}>Edit</button>
                   </td>
                 </tr>
               ))}
-              {!data.length && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No organization yet. Run the migrations or the demo seed to create Joy Alukkas.</td></tr>}
+              {!data.length && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No organization yet. Run the migrations or the demo seed to create Joy Alukkas.</td></tr>}
             </tbody>
           </table></div>
         )}
@@ -48,7 +50,7 @@ export default function OrganizationsPage() {
       <p className="text-xs text-slate-500">Add the organization&apos;s locations under <Link href="/admin/locations">Configuration → Locations</Link>.</p>
       <FormModal open={!!edit} onClose={() => setEdit(null)} title="Edit organization"
         onSubmit={async () => {
-          const body = { name: edit!.name, active: edit!.active };
+          const body = { name: edit!.name, active: edit!.active, managerId: edit!.managerId || null };
           await api(`/api/organizations/${edit!.id}`, { method: 'PATCH', body });
           toast('Saved');
           refresh();
@@ -60,6 +62,9 @@ export default function OrganizationsPage() {
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive</option>
             </select>
+          </Field>
+          <Field label="Location manager" hint="Gives the second transfer approval for any location that has no manager of its own.">
+            <UserSelect value={edit.managerId} onChange={(managerId) => setEdit({ ...edit, managerId })} placeholder="Not set" />
           </Field>
         </>}
       </FormModal>

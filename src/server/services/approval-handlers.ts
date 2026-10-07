@@ -7,6 +7,7 @@ import { holderName } from './movement';
 type T = Prisma.TransactionClient;
 type Handler = {
   execute: (t: T, initiator: Actor, req: ApprovalRequest, approvers: string, decider: Actor) => Promise<void>;
+  onAdvanced?: (t: T, req: ApprovalRequest, nextOrder: number) => Promise<void>;
   onRejected?: (t: T, actor: Actor, req: ApprovalRequest, comment: string) => Promise<void>;
   onCancelled?: (t: T, actor: Actor, req: ApprovalRequest) => Promise<void>;
 };
@@ -22,8 +23,8 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
       for (const a of pl.assets ?? []) await createAsset(initiator, a, { db: t, skipApproval: true, approverName: approvers });
     },
   },
-  // Assign covers both destinations the asset register offers: an employee / department holder,
-  // and a location, which is a transfer (op: 'transfer').
+  // Assign: an employee / department holder. (Requests raised before transfers had their own
+  // two-step approval may still carry op: 'transfer'; they are carried out the same way.)
   ASSIGN: {
     async execute(t, initiator, req, approvers) {
       const pl = p<{ op?: string; assetId?: string; assetIds?: string[]; holder?: { type: 'EMPLOYEE' | 'DEPARTMENT' | 'LOCATION'; id: string }; toLocationId?: string; remarks?: string }>(req);
@@ -52,12 +53,24 @@ export const approvalHandlers: Record<ApprovalAction, Handler> = {
       await execBulk(t, initiator, { ...p<BulkPayload>(req), op: 'retire' }, undefined, { approvalId: req.id, approverName: approvers });
     },
   },
-  // The separate transfer workflow is retired: transfers are made from the asset register and
-  // gated by ASSIGN policies. Requests raised by the old workflow were closed by the
-  // 20261006000000 migration, so nothing can reach this handler.
+  // A transfer (assets assigned to a location from the asset register). Step 1 is an
+  // Administrator, step 2 the destination's location manager; only after both does anything move.
   TRANSFER: {
-    async execute() {
-      throw new Error('The separate transfer workflow has been retired; transfers are made from the asset register.');
+    async execute(t, initiator, req, approvers) {
+      const pl = p<{ assetIds: string[]; toLocationId: string; remarks?: string | null }>(req);
+      const assets = await t.asset.findMany({ where: { id: { in: pl.assetIds } }, orderBy: { assetCode: 'asc' } });
+      for (const asset of assets) await execTransfer(t, initiator, asset, pl.toLocationId, pl.remarks ?? null, { approvalId: req.id, approverName: approvers });
+      await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'APPROVED' } });
+    },
+    async onAdvanced(t, req) {
+      await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'PENDING_LOCATION_MANAGER' } });
+    },
+    // Rejected at either step: the assets never moved, so only their transfer status changes.
+    async onRejected(t, _actor, req) {
+      await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'REJECTED' } });
+    },
+    async onCancelled(t, _actor, req) {
+      await t.asset.updateMany({ where: { transferRequestId: req.id }, data: { transferStatus: 'NONE', transferRequestId: null } });
     },
   },
 };

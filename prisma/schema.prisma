@@ -65,6 +65,15 @@ enum MovementKind {
   CORRECTION
 }
 
+/// Where an asset's latest transfer request stands (shown in the asset register).
+enum AssetTransferStatus {
+  NONE
+  PENDING_ADMIN
+  PENDING_LOCATION_MANAGER
+  APPROVED
+  REJECTED
+}
+
 enum TransferStatus {
   DRAFT
   PENDING_APPROVAL
@@ -304,6 +313,9 @@ model Location {
   /// Human path, e.g. "South / Kerala / Angamaly". Recomputed for descendants on rename.
   namePath  String
   depth     Int          @default(0)
+  /// Approves transfers into this location (step 2 of a transfer). Unset → the nearest ancestor's manager.
+  managerId String?
+  manager   User?        @relation("LocationManager", fields: [managerId], references: [id], onDelete: SetNull)
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -377,6 +389,7 @@ model User {
   tokens        AuthToken[]
   notifications Notification[]
   savedFilters  SavedFilter[]
+  managedLocations Location[] @relation("LocationManager")
 
   @@index([role, active])
   @@index([locationId])
@@ -494,6 +507,9 @@ model Asset {
   flagTransferException Boolean  @default(false)
   flagMissing           Boolean  @default(false)
   flagDuplicateSuspect  Boolean  @default(false)
+  /// The latest transfer request for this asset and where it stands; the request is in approval_requests.
+  transferStatus    AssetTransferStatus @default(NONE)
+  transferRequestId String?
   /// Origin per field: {"hostname":"scalefusion","make":"import"}
   fieldSources    Json           @default("{}")
   origin          String         @default("manual")
@@ -524,6 +540,7 @@ model Asset {
   @@index([holderEmployeeId])
   @@index([warrantyEnd])
   @@index([createdAt])
+  @@index([transferStatus])
   @@map("assets")
 }
 

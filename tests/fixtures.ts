@@ -15,7 +15,7 @@ const uid = () => `${Date.now().toString(36)}${(n++).toString(36)}`;
 /**
  * A small, isolated organization per test file: one organization (the root of the location
  * tree) with two states and three branches (A and B in state 1, C in state 2), an admin, an IT
- * operator, a branch user for A and one for C, a category, a department and an employee per
+ * operator, a branch user (and location manager) for each of A, B and C, a category, a department and an employee per
  * branch. Every name carries a unique suffix so files never collide in the shared test DB, and
  * every actor is bound to this world's organization, so one file never sees another's data.
  */
@@ -40,6 +40,9 @@ export async function world() {
   const it = await mk('it', 'IT_OPERATOR');
   const brA = await mk('branch-a', 'BRANCH_USER', A.id);
   const brC = await mk('branch-c', 'BRANCH_USER', C.id);
+  const brB = await mk('branch-b', 'BRANCH_USER', B.id);
+  // Location managers give the second transfer approval: each branch's own branch user.
+  for (const [loc, u] of [[A, brA], [B, brB], [C, brC]] as const) await prisma.location.update({ where: { id: loc.id }, data: { managerId: u.user.id } });
   const empA = await createEmployee(sys, { employeeCode: `EA${s}`, name: `Emp A ${s}`, departmentId: dept.id, locationId: A.id });
   const empC = await createEmployee(sys, { employeeCode: `EC${s}`, name: `Emp C ${s}`, departmentId: dept.id, locationId: C.id });
   let serial = 0;
@@ -49,6 +52,6 @@ export async function world() {
     if (!r.asset) throw new Error('asset not created');
     return r.asset;
   };
-  return { s, sys: orgActor(sys), org: region, region, st1, st2, A, B, C, cat, dept, admin, it, brA, brC, empA, empC, asset, orgActor };
+  return { s, sys: orgActor(sys), org: region, region, st1, st2, A, B, C, cat, dept, admin, it, brA, brB, brC, empA, empC, asset, orgActor };
 }
 export type World = Awaited<ReturnType<typeof world>>;

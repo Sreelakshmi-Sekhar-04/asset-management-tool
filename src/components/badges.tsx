@@ -1,4 +1,4 @@
-import { label, LINE_STATUS_LABEL, STATUS_LABEL, TRANSFER_STATUS_LABEL, VER_TASK_LABEL } from '@/lib/labels';
+import { ASSET_TRANSFER_STATUS_LABEL, label, LINE_STATUS_LABEL, STATUS_LABEL, TRANSFER_STATUS_LABEL, VER_TASK_LABEL } from '@/lib/labels';
 import { Badge } from './ui';
 
 const ASSET_TONE: Record<string, string> = { IN_STOCK: 'blue', ASSIGNED: 'green', UNDER_REPAIR: 'amber', RETIRED: 'gray' };
@@ -8,6 +8,9 @@ const TASK_TONE: Record<string, string> = { NOT_STARTED: 'gray', IN_PROGRESS: 'b
 
 export const AssetStatus = ({ s }: { s: string }) => <Badge tone={ASSET_TONE[s]}>{label(STATUS_LABEL, s)}</Badge>;
 export const TransferStatus = ({ s }: { s: string }) => <Badge tone={TRF_TONE[s]}>{label(TRANSFER_STATUS_LABEL, s)}</Badge>;
+const ASSET_TRF_TONE: Record<string, string> = { NONE: 'gray', PENDING_ADMIN: 'amber', PENDING_LOCATION_MANAGER: 'amber', APPROVED: 'green', REJECTED: 'red' };
+/** Where an asset's latest transfer request stands (asset register, asset page). */
+export const AssetTransferStatus = ({ s, title }: { s: string; title?: string }) => <Badge tone={ASSET_TRF_TONE[s]} title={title}>{label(ASSET_TRANSFER_STATUS_LABEL, s)}</Badge>;
 export const LineStatus = ({ s }: { s: string }) => <Badge tone={LINE_TONE[s]}>{label(LINE_STATUS_LABEL, s)}</Badge>;
 export const TaskStatus = ({ s }: { s: string }) => <Badge tone={TASK_TONE[s]}>{label(VER_TASK_LABEL, s)}</Badge>;
 export const Flags = ({ flags }: { flags: string[] }) => <span className="flex flex-wrap gap-1">{flags.map((f) => <Badge key={f} tone={f === 'Missing' ? 'red' : f === 'Transfer exception' ? 'red' : 'amber'}>{f}</Badge>)}</span>;

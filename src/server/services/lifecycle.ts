@@ -303,10 +303,11 @@ export async function bulkReassign(actor: Actor, assetIds: string[], toEmployeeI
 // ───────────── Transfer: assign to a location (§2, §3) ─────────────
 
 /**
- * Moving an asset to another location is a transfer, and it is the same action as assigning it
- * to an employee: one step from the asset register, no draft, no separate workflow. The asset's
- * current location becomes the destination; a holder that cannot travel with it (an employee or
- * a department) is released; a location holder follows the asset. Every change is recorded as a
+ * Moving an asset to another location is a transfer. It starts from the same Assign action as an
+ * assignment to an employee, but it only takes effect once an Administrator and then the
+ * destination's manager have approved it (requestTransfer below). On approval the asset's
+ * location becomes the destination; a holder that cannot travel with it (an employee or a
+ * department) is released; a location holder follows the asset. Every change is recorded as a
  * movement and an audit entry, so the asset's history and audit trail stay complete.
  */
 async function preTransfer(t: Db, actor: Actor, asset: Asset, to: { id: string; namePath: string }, opts: ExecOpts = {}) {
@@ -364,10 +365,10 @@ type BulkAssignProblem = { ref: string; message: string };
 
 /**
  * One action behind the asset register's Assign button, for one asset or for many.
- *   • an employee (or a department) holder  → the assets are assigned to them;
- *   • a location                           → the assets are transferred there.
- * Everything happens in a single transaction with the same checks, history, audit entries and
- * approval policy as a single assignment. Assets that are already there are skipped; assets
+ *   • an employee (or a department) holder  → the assets are assigned to them (Assign policies apply);
+ *   • a location                           → a transfer request, which needs an Administrator's and
+ *                                            then the destination manager's approval before anything moves.
+ * Everything happens in a single transaction with the same checks for one asset or many. Assets that are already there are skipped; assets
  * that cannot move (retired, under repair, locked by an approval …) are listed and left
  * untouched while the rest go through.
  */
@@ -398,18 +399,55 @@ export async function bulkAssign(actor: Actor, input: unknown) {
     }
     const verb = isTransfer ? 'transferred' : 'assigned';
     const released = isTransfer ? ok.filter((a) => { const h = holderOf(a); return h && h.type !== 'LOCATION'; }).length : 0;
-    const result = { mode: isTransfer ? ('TRANSFER' as const) : ('ASSIGN' as const), holder: name, selected: assets.length, skipped, failed, released };
+    // Every transfer waits for two approvals; the check step names who gives them.
+    const manager = isTransfer && ok.length ? await locationManager(t, to!.id) : null;
+    const approvals = manager ? ['Admin manager: any Administrator', `Location manager: ${manager.name} (${manager.locationName})`] : undefined;
+    const result = { mode: isTransfer ? ('TRANSFER' as const) : ('ASSIGN' as const), holder: name, selected: assets.length, skipped, failed, released, approvals };
     if (data.dryRun) return { ...result, assignable: ok.length, assigned: 0 };
-    if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be ${verb} ${isTransfer ? 'to' : 'to'} ${name}. Nothing was changed.`, [...failed, ...skipped]);
-    const payload = isTransfer
-      ? { op: 'transfer', assetIds: ok.map((a) => a.id), toLocationId: to!.id, remarks: data.remarks ?? null }
-      : { op: 'assign', assetIds: ok.map((a) => a.id), holder, remarks: data.remarks ?? null };
-    const g = await gate(t, actor, 'ASSIGN', ok, `${isTransfer ? 'Transfer' : 'Assign'} ${ok.length} asset(s) to ${name}`, payload);
+    if (!ok.length) throw badRequest(`None of the ${assets.length} selected asset(s) can be ${verb} to ${name}. Nothing was changed.`, [...failed, ...skipped]);
+    if (isTransfer) return { ...result, assignable: ok.length, assigned: 0, ...(await requestTransfer(t, actor, ok, to!, manager!, data.remarks ?? null)) };
+    const payload = { op: 'assign', assetIds: ok.map((a) => a.id), holder, remarks: data.remarks ?? null };
+    const g = await gate(t, actor, 'ASSIGN', ok, `Assign ${ok.length} asset(s) to ${name}`, payload);
     if (g) return { ...result, assignable: ok.length, assigned: 0, ...g };
-    for (const a of ok) {
-      if (isTransfer) await execTransfer(t, actor, a, to!.id, data.remarks ?? null);
-      else await execAssign(t, actor, a, holder, data.remarks ?? null);
-    }
+    for (const a of ok) await execAssign(t, actor, a, holder, data.remarks ?? null);
     return { ...result, assignable: ok.length, assigned: ok.length };
   }, { timeoutMs: 120_000 });
+}
+
+// ───────────── Transfer approval: Administrator, then the destination's manager ─────────────
+
+/**
+ * The manager who approves transfers into a location: the location's own manager, else the
+ * nearest ancestor's (a region's, or the organization's). Without one the transfer cannot be
+ * requested, because nobody could give the second approval.
+ */
+export async function locationManager(db: Db, locationId: string) {
+  const loc = await db.location.findUniqueOrThrow({ where: { id: locationId }, select: { idPath: true, namePath: true } });
+  const ids = loc.idPath.split('/').filter(Boolean).reverse();
+  const chain = await db.location.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, manager: { select: { id: true, name: true, active: true } } } });
+  const byId = new Map(chain.map((l) => [l.id, l]));
+  for (const id of ids) {
+    const l = byId.get(id);
+    if (l?.manager?.active) return { userId: l.manager.id, name: l.manager.name, locationName: l.name };
+  }
+  throw conflict(`${loc.namePath} has no location manager to approve transfers into it. Set one under Configuration → Locations.`);
+}
+
+/**
+ * Raises the transfer request. Nothing moves yet: the assets stay where they are, marked
+ * "Pending admin approval", until an Administrator and then the destination's manager approve.
+ * There is no approval policy to match and no automatic approval.
+ */
+async function requestTransfer(t: Db, actor: Actor, assets: Asset[], to: { id: string; namePath: string }, manager: { userId: string }, remarks: string | null): Promise<Pending> {
+  const req = await createApprovalRequest(t, actor, {
+    action: 'TRANSFER', policy: null, defaultPolicyName: 'Transfer approval',
+    defaultSteps: [{ stepOrder: 1, approverType: 'ROLE', approverRole: 'ADMIN' }, { stepOrder: 2, approverType: 'USER', approverUserId: manager.userId }],
+    summary: `Transfer ${assets.length} asset${assets.length === 1 ? '' : 's'} to ${to.namePath}`,
+    entityType: 'Asset', entityId: assets.length === 1 ? assets[0].id : undefined, assetIds: assets.map((a) => a.id),
+    locationIds: [...new Set([...assets.map((a) => a.locationId).filter((x): x is string => !!x), to.id])],
+    payload: { op: 'transfer', assetIds: assets.map((a) => a.id), toLocationId: to.id, remarks }, link: '/approvals',
+  });
+  await t.asset.updateMany({ where: { id: { in: assets.map((a) => a.id) } }, data: { transferStatus: 'PENDING_ADMIN', transferRequestId: req.id } });
+  await auditMany(t, actor, assets.map((a) => ({ action: 'APPROVAL_REQUESTED', entityType: 'Asset', entityId: a.id, entityLabel: a.assetCode, details: { requestNo: req.requestNo, action: 'TRANSFER', to: to.namePath, remarks }, locationIds: [a.locationId, to.id] })));
+  return { pendingApproval: { id: req.id, requestNo: req.requestNo, policy: req.policyName } };
 }

@@ -7,7 +7,7 @@ import { assetFiltersFromQuery } from '@/components/asset-filters';
 import { PrintLabelsDialog } from '@/components/labels';
 import { AssetStatus, Flags } from '@/components/badges';
 import { BulkAssignDialog, bulkAssignMessage } from '@/components/bulk-assign';
-import { Dash, HolderCell, LocationCell, useAssetColumnFilters, WarrantyCell } from '@/components/asset-list-parts';
+import { Dash, DuplicateDetails, HolderCell, LocationCell, TransferStatusCell, useAssetColumnFilters, WarrantyCell, type DuplicateInfo, type TransferInfo } from '@/components/asset-list-parts';
 import { ActiveFilters } from '@/components/column-filter';
 import { DataTable, emptySelection, SavedFiltersMenu, selectionCount, useListState, type Column, type Selection } from '@/components/list';
 import { useMe } from '@/components/me';
@@ -16,6 +16,7 @@ import { Badge, ErrorBox, Field, FormModal, PageHeader, useToast } from '@/compo
 export interface AssetRow {
   id: string; assetCode: string; legacyTag: string | null; category: string; make: string; model: string; serialNumber: string | null; hostname: string | null; ipAddress: string | null;
   status: string; location: string | null; holderType: string | null; holder: string | null; warrantyEnd: string | null; flags: string[]; openTransfer: { id: string; transferNo: string; status: string; toLocation: string } | null;
+  transferStatus: string; transfer: TransferInfo | null; duplicates: DuplicateInfo[];
 }
 
 export default function AssetRegister() {
@@ -35,32 +36,29 @@ export default function AssetRegister() {
   const { filters, chips } = useAssetColumnFilters(ls);
   const selPayload = () => (sel.mode === 'ids' ? { assetIds: [...sel.ids] } : { filter: assetFiltersFromQuery(ls.query), excludeIds: [...sel.exclude] });
 
+  // Asset ID, Category, Legacy tag, IP address, Status and Transfer status each have their own
+  // column, first, so they are in view; the rest follow and the table scrolls sideways when needed.
   const baseCols: Column<AssetRow>[] = [
-    { key: 'assetCode', header: 'Asset ID', sortable: true, className: 'align-middle', render: (r) => (
-      <span className="block whitespace-nowrap">
-        <Link href={`/assets/${r.id}`} className="font-semibold">{r.assetCode}</Link>
-        <span className="block text-xs text-slate-500">{r.category}</span>
-        {r.legacyTag && <span className="block text-[11px] text-slate-400">Legacy {r.legacyTag}</span>}
-      </span>
+    { key: 'assetCode', header: 'Asset ID', sortable: true, className: 'align-middle', render: (r) => <Link href={`/assets/${r.id}`} className="whitespace-nowrap font-semibold">{r.assetCode}</Link> },
+    { key: 'name', header: 'Asset name', sortable: true, className: 'align-middle', render: (r) => (
+      <span className="block min-w-[8rem]"><span className="text-slate-600">{r.make}</span> <span className="font-medium text-slate-900">{r.model}</span></span>
     ) },
-    { key: 'make', header: 'Make', sortable: true, className: 'align-middle', render: (r) => <span className="whitespace-nowrap text-slate-600">{r.make}</span> },
-    { key: 'model', header: 'Model', sortable: true, className: 'align-middle', render: (r) => <span className="block min-w-[6.5rem] font-medium text-slate-900">{r.model}</span> },
+    { key: 'category', header: 'Category', sortable: true, className: 'align-middle', render: (r) => <span className="whitespace-nowrap">{r.category}</span> },
     { key: 'serialNumber', header: 'Serial no.', sortable: true, className: 'align-middle', render: (r) => (r.serialNumber ? <span className="whitespace-nowrap font-mono text-xs text-slate-700">{r.serialNumber}</span> : <Dash />) },
-    { key: 'hostname', header: 'Hostname', sortable: true, className: 'align-middle', render: (r) => (r.hostname || r.ipAddress ? (
-      <span className="block whitespace-nowrap">
-        {r.hostname ?? <Dash />}
-        {r.ipAddress && <span className="block font-mono text-[11px] text-slate-500">IP {r.ipAddress}</span>}
-      </span>
-    ) : <Dash />) },
-    { key: 'location', header: 'Location', sortable: true, className: 'align-middle', render: (r) => <LocationCell path={r.location} /> },
-    { key: 'holder', header: 'Assigned to', className: 'align-middle', render: (r) => <HolderCell type={r.holderType} holder={r.holder} /> },
+    { key: 'legacyTag', header: 'Legacy tag', sortable: true, className: 'align-middle', render: (r) => (r.legacyTag ? <span className="whitespace-nowrap text-xs">{r.legacyTag}</span> : <Dash />) },
+    { key: 'ipAddress', header: 'IP address', sortable: true, className: 'align-middle', render: (r) => (r.ipAddress ? <span className="whitespace-nowrap font-mono text-xs">{r.ipAddress}</span> : <Dash />) },
     { key: 'status', header: 'Status', sortable: true, className: 'align-middle', render: (r) => (
       <span className="flex flex-col items-start gap-1">
         <AssetStatus s={r.status} />
         {r.openTransfer && <Badge tone="purple" title={`To ${r.openTransfer.toLocation}`}>{r.openTransfer.transferNo}</Badge>}
         {r.flags.length > 0 && <Flags flags={r.flags} />}
+        <DuplicateDetails items={r.duplicates} compact />
       </span>
     ) },
+    { key: 'transferStatus', header: 'Transfer status', sortable: true, className: 'align-middle', render: (r) => <TransferStatusCell status={r.transferStatus} transfer={r.transfer} /> },
+    { key: 'location', header: 'Location', sortable: true, className: 'align-middle', render: (r) => <LocationCell path={r.location} /> },
+    { key: 'holder', header: 'Assigned to', className: 'align-middle', render: (r) => <HolderCell type={r.holderType} holder={r.holder} /> },
+    { key: 'hostname', header: 'Hostname', sortable: true, className: 'align-middle', render: (r) => (r.hostname ? <span className="whitespace-nowrap">{r.hostname}</span> : <Dash />) },
     { key: 'warrantyEnd', header: 'Warranty end', sortable: true, className: 'align-middle', render: (r) => <WarrantyCell end={r.warrantyEnd} /> },
   ];
   const cols = baseCols.map((c) => ({ ...c, filter: filters[c.key] }));
@@ -87,7 +85,7 @@ export default function AssetRegister() {
         </>} />
       {count > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          {me.isIT && <button className="btn btn-sm btn-primary" onClick={() => setAssignOpen(true)}>{count > 1 ? `Assign / transfer ${count}` : 'Assign'}</button>}
+          {me.isIT && <button className="btn btn-sm btn-primary" onClick={() => setAssignOpen(true)}>{count > 1 ? `Assign ${count}` : 'Assign'}</button>}
           <button className="btn btn-sm" onClick={labels}>Print labels</button>
           {me.isIT && <>
             <button className="btn btn-sm" onClick={() => { setBulk('CHECK_IN'); setReason(''); }}>Check in</button>

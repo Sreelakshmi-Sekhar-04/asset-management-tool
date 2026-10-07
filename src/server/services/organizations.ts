@@ -13,10 +13,12 @@ import { createLocation, updateLocation } from './locations';
 export const organizationInput = z.object({
   name: z.string().trim().min(1, 'Name is required').max(120).refine((s) => !s.includes('/'), 'Name cannot contain "/"'),
   active: z.boolean().default(true),
+  /** Approves transfers into any of its locations that have no manager of their own. */
+  managerId: z.string().nullable().optional(),
 });
 
 export async function listOrganizationsWithCounts() {
-  const orgs = await prisma.location.findMany({ where: { parentId: null }, orderBy: { name: 'asc' } });
+  const orgs = await prisma.location.findMany({ where: { parentId: null }, orderBy: { name: 'asc' }, include: { manager: { select: { name: true } } } });
   return Promise.all(orgs.map(async (o) => {
     const inOrg = { idPath: { startsWith: o.idPath } };
     const [locations, employees, assets] = await Promise.all([
@@ -24,7 +26,7 @@ export async function listOrganizationsWithCounts() {
       prisma.employee.count({ where: { location: inOrg } }),
       prisma.asset.count({ where: { location: inOrg, status: { not: 'RETIRED' } } }),
     ]);
-    return { id: o.id, name: o.name, active: o.active, createdAt: o.createdAt, updatedAt: o.updatedAt, locations, employees, assets };
+    return { id: o.id, name: o.name, active: o.active, managerId: o.managerId, managerName: o.manager?.name ?? null, createdAt: o.createdAt, updatedAt: o.updatedAt, locations, employees, assets };
   }));
 }
 
@@ -43,5 +45,5 @@ export async function updateOrganization(actor: Actor, id: string, input: unknow
   if (data.active === false && (await prisma.location.count({ where: { parentId: null, active: true, id: { not: id } } })) === 0) {
     throw badRequest(`${org.name} is the only active organization. Add or activate another one first.`);
   }
-  return updateLocation(actor, id, { ...(data.name !== undefined && { name: data.name }), ...(data.active !== undefined && { active: data.active }) });
+  return updateLocation(actor, id, { ...(data.name !== undefined && { name: data.name }), ...(data.active !== undefined && { active: data.active }), ...(data.managerId !== undefined && { managerId: data.managerId }) });
 }

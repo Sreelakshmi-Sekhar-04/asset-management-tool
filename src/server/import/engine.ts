@@ -15,7 +15,13 @@ import { applyAssets, validateAssets } from './assets';
 import { applyBranchUsers, applyEmployees, validateBranchUsers, validateEmployees } from './employees';
 import type { RowResult, ValidationResult } from './common';
 
-export async function startImport(actor: Actor, p: { type: ImportType; mode: 'CREATE_ONLY' | 'CREATE_OR_UPDATE'; createMissing: boolean; fileName: string; data: Buffer }) {
+/**
+ * Starts the dry run of an uploaded file. There is no mode to choose: each row is matched against
+ * the register, so a new record is created, an existing one is updated, and one already there with
+ * the same details is reported as a duplicate. (`mode` is kept for callers that still pass it.)
+ */
+export async function startImport(actor: Actor, p: { type: ImportType; mode?: 'CREATE_ONLY' | 'CREATE_OR_UPDATE'; createMissing: boolean; fileName: string; data: Buffer }) {
+  const mode = p.mode ?? 'CREATE_OR_UPDATE';
   if (actor.role === 'BRANCH_USER') {
     await audit(prisma, actor, { action: 'ACCESS_DENIED', entityType: 'Import', details: { attempted: 'import', type: p.type } });
     throw forbidden('Imports are an IT function.');
@@ -27,9 +33,9 @@ export async function startImport(actor: Actor, p: { type: ImportType; mode: 'CR
   await parseTabular(p.fileName, p.data, aliasMap(COLUMNS[p.type]));
   const key = newKey('imports', p.fileName.toLowerCase().endsWith('.csv') ? '.csv' : '.xlsx');
   await putObject(key, p.data);
-  const job = await prisma.importJob.create({ data: { type: p.type, mode: p.mode, createMissing: p.createMissing, fileName: p.fileName.slice(0, 200), storageKey: key, createdById: actor.id, createdByName: actor.name } });
+  const job = await prisma.importJob.create({ data: { type: p.type, mode, createMissing: p.createMissing, fileName: p.fileName.slice(0, 200), storageKey: key, createdById: actor.id, createdByName: actor.name } });
   await enqueue('import.validate', { jobId: job.id });
-  await audit(prisma, actor, { action: 'IMPORT_UPLOADED', entityType: 'Import', entityId: job.id, entityLabel: job.fileName, details: { type: p.type, mode: p.mode, createMissing: p.createMissing, bytes: p.data.length } });
+  await audit(prisma, actor, { action: 'IMPORT_UPLOADED', entityType: 'Import', entityId: job.id, entityLabel: job.fileName, details: { type: p.type, mode, createMissing: p.createMissing, bytes: p.data.length } });
   return job;
 }
 
@@ -241,15 +247,30 @@ async function withAssetView<R extends { data: Prisma.JsonValue; outcome: string
   const assetIds = [...new Set(rows.flatMap((r) => [r.resultId, r.matchedId]).filter((x): x is string => !!x))];
   const [emps, assets] = await Promise.all([
     codes.length ? prisma.employee.findMany({ where: { employeeCode: { in: codes, mode: 'insensitive' } }, select: { employeeCode: true, name: true } }) : [],
-    assetIds.length ? prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, assetCode: true, status: true } }) : [],
+    assetIds.length ? prisma.asset.findMany({ where: { id: { in: assetIds } }, select: { id: true, assetCode: true, status: true, make: true, model: true, serialNumber: true, legacyTag: true, category: { select: { name: true } } } }) : [],
   ]);
   const empName = new Map(emps.map((e) => [e.employeeCode.toLowerCase(), e.name]));
   const byId = new Map(assets.map((a) => [a.id, a]));
   return rows.map((r) => {
     const code = String((r.data as Record<string, string>).holderemployeeid ?? '').trim();
-    const a = byId.get(r.resultId ?? '') ?? byId.get(r.matchedId ?? '') ?? null;
-    return { ...r, view: { holderName: code ? empName.get(code.toLowerCase()) ?? null : null, asset: a } };
+    const full = byId.get(r.resultId ?? '') ?? byId.get(r.matchedId ?? '') ?? null;
+    const a = full && { id: full.id, assetCode: full.assetCode, status: full.status };
+    const m = r.outcome !== 'CREATED' && !r.resultId ? byId.get(r.matchedId ?? '') : undefined;
+    return { ...r, view: { holderName: code ? empName.get(code.toLowerCase()) ?? null : null, asset: a, duplicate: m ? duplicateOf(r.data as Record<string, string>, m) : null } };
   });
+}
+
+/**
+ * For a row that matches an asset already in the register: which field matched, the value
+ * uploaded, and the existing asset, so the preview can say exactly why the row is a duplicate.
+ */
+function duplicateOf(d: Record<string, string>, a: { id: string; assetCode: string; status: string; make: string; model: string; serialNumber: string | null; legacyTag: string | null; category: { name: string } }) {
+  const v = (k: string) => String(d[k] ?? '').trim();
+  const same = (x: string, y: string | null) => !!x && !!y && x.toLowerCase() === y.toLowerCase();
+  const [field, fieldLabel, value] = same(v('serialnumber'), a.serialNumber) ? ['serial', 'Serial number', v('serialnumber')]
+    : same(v('legacytag'), a.legacyTag) ? ['legacyTag', 'Legacy tag', v('legacytag')]
+    : ['details', 'All details (no serial number or legacy tag)', [v('make'), v('model')].filter(Boolean).join(' ')];
+  return { field, fieldLabel, value, asset: { id: a.id, assetCode: a.assetCode, name: `${a.make} ${a.model}`, category: a.category.name, serialNumber: a.serialNumber, legacyTag: a.legacyTag, status: a.status } };
 }
 
 /** FR-IMP-05: every row with its original row number, outcome and reason, as CSV. */
@@ -259,7 +280,7 @@ export async function importReportCsv(actor: Actor, id: string) {
   const rows = await prisma.importRow.findMany({ where: { jobId: id }, orderBy: { rowNumber: 'asc' } });
   const cols = COLUMNS[job.type].map((c) => c.key);
   const header = ['Row', 'Outcome', 'Reason', 'Result ID', ...COLUMNS[job.type].map((c) => c.header)];
-  const outcomeLabel = (o: string) => (o === 'UNCHANGED' ? 'Duplicate' : o[0] + o.slice(1).toLowerCase());
+  const outcomeLabel = (o: string) => ({ CREATED: 'New', UPDATED: 'Existing', UNCHANGED: 'Duplicate', WARNING: 'Possible duplicate', REJECTED: 'Invalid' } as Record<string, string>)[o] ?? o;
   const lines = rows.map((r) => [r.rowNumber, outcomeLabel(r.outcome), r.messages.join(' | '), r.resultCode ?? '', ...cols.map((k) => (r.data as Record<string, string>)[k] ?? '')]);
   await audit(prisma, actor, { action: 'EXPORT', entityType: 'Import', entityId: id, entityLabel: `${job.fileName} result report`, details: { rows: rows.length, format: 'csv' } });
   return { data: Buffer.from('﻿' + stringify([header, ...lines])), name: `${job.fileName.replace(/\.[^.]+$/, '')}-result.csv` };

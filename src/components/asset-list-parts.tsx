@@ -1,7 +1,9 @@
 'use client';
 import clsx from 'clsx';
+import Link from 'next/link';
 import { fmtDateOnly } from '@/lib/format';
-import { label, STATUS_LABEL } from '@/lib/labels';
+import { ASSET_TRANSFER_STATUS_LABEL, label, STATUS_LABEL } from '@/lib/labels';
+import { AssetTransferStatus } from './badges';
 import { type useListState } from './list';
 import { MultiOptionFilter, OptionFilter, SelectFilter, TextFilter, type ColumnFilterDef, type FilterChip } from './column-filter';
 import { LocationSelect, useCategories, useLocations } from './pickers';
@@ -25,6 +27,8 @@ export function useAssetColumnFilters(ls: ListState) {
   const { data: locs } = useLocations();
   const warranty = ls.get('warrantyWithinDays') || (ls.get('warrantyExpired') ? 'expired' : '');
   const statuses = ls.getAll('status');
+  const transferStatuses = ls.getAll('transferStatus');
+  const transferOpts: Opt[] = Object.entries(ASSET_TRANSFER_STATUS_LABEL).map(([value, label]) => ({ value, label }));
   const statusOpts: Opt[] = Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }));
   const catOpts: Opt[] = (cats ?? []).map((c) => ({ value: c.id, label: c.name }));
   const text = (k: string, placeholder: string, hint?: string): ColumnFilterDef => ({
@@ -33,17 +37,22 @@ export function useAssetColumnFilters(ls: ListState) {
   });
 
   const filters: Record<string, ColumnFilterDef> = {
-    assetCode: {
-      active: !!ls.get('assetCode') || ls.getAll('categoryId').length > 0,
+    assetCode: text('assetCode', 'Asset ID contains…'),
+    category: {
+      active: ls.getAll('categoryId').length > 0,
+      content: (close) => <OptionFilter label="Category" value={ls.get('categoryId')} options={catOpts} allLabel="All categories" onChange={(v) => ls.set('categoryId', v)} close={close} />,
+    },
+    legacyTag: text('legacyTag', 'Legacy tag contains…'),
+    ipAddress: text('ip', 'IP address contains…'),
+    name: {
+      active: !!ls.get('make') || !!ls.get('model'),
       content: (close) => <>
-        <TextFilter value={ls.get('assetCode')} placeholder="Asset ID or legacy tag contains…" onApply={(v) => ls.set('assetCode', v)} close={close} />
-        <div className="border-t pt-3"><OptionFilter label="Category" value={ls.get('categoryId')} options={catOpts} allLabel="All categories" onChange={(v) => ls.set('categoryId', v)} close={close} /></div>
+        <TextFilter value={ls.get('make')} placeholder="Make contains…" onApply={(v) => ls.set('make', v)} close={close} />
+        <div className="border-t pt-3"><TextFilter value={ls.get('model')} placeholder="Model contains…" onApply={(v) => ls.set('model', v)} close={close} /></div>
       </>,
     },
-    make: text('make', 'Make contains…'),
-    model: text('model', 'Model contains…'),
     serialNumber: text('serial', 'Serial contains…'),
-    hostname: text('hostname', 'Hostname or IP contains…'),
+    hostname: text('hostname', 'Hostname contains…'),
     location: {
       active: !!ls.get('locationId'),
       content: (close) => (
@@ -66,6 +75,10 @@ export function useAssetColumnFilters(ls: ListState) {
         <div className="border-t pt-3"><OptionFilter label="Flag" value={ls.get('flag')} options={FLAG_OPTS} allLabel="No flag filter" onChange={(v) => ls.set('flag', v)} close={close} /></div>
       </>,
     },
+    transferStatus: {
+      active: transferStatuses.length > 0,
+      content: (close) => <MultiOptionFilter label="Transfer status" values={transferStatuses} options={transferOpts} onApply={(v) => ls.set('transferStatus', v)} close={close} />,
+    },
     warrantyEnd: {
       active: !!warranty,
       content: (close) => (
@@ -80,6 +93,8 @@ export function useAssetColumnFilters(ls: ListState) {
   if (ls.get('search')) chips.push({ label: `Search: “${ls.get('search')}”`, clear: () => ls.set('search', null) });
   chip('assetCode', 'Asset ID');
   if (ls.getAll('categoryId').length) chips.push({ label: `Category: ${ls.getAll('categoryId').map((id) => cats?.find((c) => c.id === id)?.name ?? '…').join(', ')}`, clear: () => ls.set('categoryId', null) });
+  chip('legacyTag', 'Legacy tag');
+  chip('ip', 'IP address');
   chip('make', 'Make');
   chip('model', 'Model');
   chip('serial', 'Serial');
@@ -88,6 +103,7 @@ export function useAssetColumnFilters(ls: ListState) {
   chip('holder', 'Assigned to');
   if (ls.get('holderType')) chips.push({ label: `Holder: ${optLabel(HOLDER_OPTS, ls.get('holderType'))}`, clear: () => ls.set('holderType', null) });
   if (statuses.length) chips.push({ label: `Status: ${statuses.map((st) => label(STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('status', null) });
+  if (transferStatuses.length) chips.push({ label: `Transfer: ${transferStatuses.map((st) => label(ASSET_TRANSFER_STATUS_LABEL, st)).join(', ')}`, clear: () => ls.set('transferStatus', null) });
   if (ls.get('flag')) chips.push({ label: `Flag: ${optLabel(FLAG_OPTS, ls.get('flag'))}`, clear: () => ls.set('flag', null) });
   if (warranty) chips.push({ label: `Warranty: ${optLabel(WARRANTY_OPTS, warranty)}`, clear: () => ls.setMany({ warrantyWithinDays: null, warrantyExpired: null }) });
   if (ls.get('hasOpenTransfer')) chips.push({ label: ls.get('hasOpenTransfer') === 'true' ? 'In an open transfer' : 'Not in an open transfer', clear: () => ls.set('hasOpenTransfer', null) });
@@ -133,5 +149,59 @@ export function WarrantyCell({ end }: { end: string | null }) {
       {fmtDateOnly(end)}
       {note && <span className={clsx('block text-[11px] font-medium', note.cls)}>{note.text}</span>}
     </span>
+  );
+}
+
+export interface TransferInfo { id: string; requestNo: string; toLocation: string | null; rejectedBy: string | null; reason: string | null }
+
+/** Transfer status column: the status, the destination while pending, and why a rejected one was rejected. */
+export function TransferStatusCell({ status, transfer }: { status: string; transfer: TransferInfo | null }) {
+  if (status === 'NONE' || !transfer) return <span className="text-xs text-slate-400">No transfer</span>;
+  const to = transfer.toLocation?.split(' / ').pop();
+  return (
+    <span className="flex min-w-[9rem] flex-col items-start gap-0.5">
+      <AssetTransferStatus s={status} title={transfer.requestNo} />
+      <span className="text-[11px] text-slate-500">
+        <Link href={`/approvals/${transfer.id}`}>{transfer.requestNo}</Link>{to ? ` · to ${to}` : ''}
+      </span>
+      {status === 'REJECTED' && transfer.reason && <span className="max-w-[14rem] text-[11px] text-red-700">{transfer.rejectedBy ? `${transfer.rejectedBy}: ` : ''}{transfer.reason}</span>}
+    </span>
+  );
+}
+
+export interface DuplicateInfo {
+  field: string; fieldLabel: string; value: string; reason: string | null;
+  other: { id: string; assetCode: string; name: string; category: string; serialNumber: string | null; legacyTag: string | null; status: string; location: string | null };
+}
+
+/** What makes an asset a duplicate suspect: the duplicated field and value, and the existing asset that has it. */
+export function DuplicateDetails({ items, compact }: { items: DuplicateInfo[]; compact?: boolean }) {
+  if (!items.length) return null;
+  if (compact) {
+    return (
+      <span className="block max-w-[15rem] text-[11px] leading-snug text-amber-800">
+        {items.map((d, i) => (
+          <span key={i} className="block">Same {d.fieldLabel.toLowerCase()} <span className="font-mono">{d.value}</span> as <Link href={`/assets/${d.other.id}`}>{d.other.assetCode}</Link></span>
+        ))}
+      </span>
+    );
+  }
+  return (
+    <div className="table-wrap">
+      <table className="tbl">
+        <thead><tr><th>Duplicate field</th><th>Value</th><th>Existing asset</th><th>Asset name</th><th>Serial number</th><th>Legacy tag</th><th>Reason recorded</th></tr></thead>
+        <tbody>{items.map((d, i) => (
+          <tr key={i}>
+            <td className="font-medium">{d.fieldLabel}</td>
+            <td className="font-mono text-xs">{d.value}</td>
+            <td><Link href={`/assets/${d.other.id}`} className="font-semibold">{d.other.assetCode}</Link><span className="block text-[11px] text-slate-500">{d.other.location ?? ''}</span></td>
+            <td>{d.other.name}<span className="block text-[11px] text-slate-500">{d.other.category}</span></td>
+            <td className="font-mono text-xs">{d.other.serialNumber ?? <Dash />}</td>
+            <td className="text-xs">{d.other.legacyTag ?? <Dash />}</td>
+            <td className="text-xs text-slate-600">{d.reason ?? <Dash />}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
   );
 }

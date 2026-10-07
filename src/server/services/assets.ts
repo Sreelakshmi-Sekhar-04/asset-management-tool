@@ -54,16 +54,16 @@ export interface DuplicateHit {
   key: 'serial' | 'legacyTag' | 'hostname' | 'ip';
   severity: 'BLOCK' | 'WARN';
   value: string;
-  match: { id: string; assetCode: string; status: string; make: string; model: string; location: string | null };
+  match: { id: string; assetCode: string; status: string; make: string; model: string; serialNumber: string | null; legacyTag: string | null; location: string | null };
 }
 
 export async function findDuplicates(db: Db, f: { serialNumber?: string | null; legacyTag?: string | null; hostname?: string | null; ipAddress?: string | null }, excludeId?: string): Promise<DuplicateHit[]> {
   const rules = (await getSettings(db)).duplicateRules;
   const hits: DuplicateHit[] = [];
   const not = excludeId ? { id: { not: excludeId } } : {};
-  const sel = { id: true, assetCode: true, status: true, make: true, model: true, location: { select: { namePath: true } } } as const;
-  const push = (key: DuplicateHit['key'], severity: DuplicateHit['severity'], value: string, rows: { id: string; assetCode: string; status: string; make: string; model: string; location: { namePath: string } | null }[]) => {
-    for (const r of rows) hits.push({ key, severity, value, match: { id: r.id, assetCode: r.assetCode, status: r.status, make: r.make, model: r.model, location: r.location?.namePath ?? null } });
+  const sel = { id: true, assetCode: true, status: true, make: true, model: true, serialNumber: true, legacyTag: true, location: { select: { namePath: true } } } as const;
+  const push = (key: DuplicateHit['key'], severity: DuplicateHit['severity'], value: string, rows: { id: string; assetCode: string; status: string; make: string; model: string; serialNumber: string | null; legacyTag: string | null; location: { namePath: string } | null }[]) => {
+    for (const r of rows) hits.push({ key, severity, value, match: { id: r.id, assetCode: r.assetCode, status: r.status, make: r.make, model: r.model, serialNumber: r.serialNumber, legacyTag: r.legacyTag, location: r.location?.namePath ?? null } });
   };
   const serial = f.serialNumber?.trim();
   if (serial) push('serial', 'BLOCK', serial, await db.asset.findMany({ where: { serialNormalized: serial.toLowerCase(), ...not }, select: sel, take: 5 }));
@@ -365,6 +365,9 @@ export interface AssetFilters {
   warrantyExpired?: boolean;
   flag?: string;
   hasOpenTransfer?: boolean;
+  legacyTag?: string;
+  ip?: string;
+  transferStatuses?: string[];
   ids?: string[];
   excludeIds?: string[];
 }
@@ -389,6 +392,9 @@ export async function assetWhere(actor: Actor, f: AssetFilters): Promise<Prisma.
   if (f.make?.trim()) and.push({ make: has(f.make) });
   if (f.model?.trim()) and.push({ model: has(f.model) });
   if (f.serial?.trim()) and.push({ serialNumber: has(f.serial) });
+  if (f.legacyTag?.trim()) and.push({ legacyTag: has(f.legacyTag) });
+  if (f.ip?.trim()) and.push({ ipAddress: { contains: f.ip.trim() } });
+  if (f.transferStatuses?.length) and.push({ transferStatus: { in: f.transferStatuses as Asset['transferStatus'][] } });
   if (f.hostname?.trim()) and.push({ OR: [{ hostname: has(f.hostname) }, { ipAddress: { contains: f.hostname.trim() } }] });
   if (f.holder?.trim()) {
     and.push({
@@ -429,6 +435,7 @@ const SORTS: Record<string, (dir: 'asc' | 'desc') => Prisma.AssetOrderByWithRela
   serialNumber: (d) => ({ serialNumber: d }), hostname: (d) => ({ hostname: d }), ipAddress: (d) => ({ ipAddress: d }),
   warrantyEnd: (d) => ({ warrantyEnd: d }), createdAt: (d) => ({ createdAt: d }), updatedAt: (d) => ({ updatedAt: d }),
   location: (d) => ({ location: { namePath: d } }), category: (d) => ({ category: { name: d } }), legacyTag: (d) => ({ legacyTag: d }),
+  transferStatus: (d) => ({ transferStatus: d }), name: (d) => ({ make: d }),
 };
 
 export const assetListInclude = {
@@ -456,6 +463,7 @@ export function shapeAsset(a: AssetRow) {
     warrantyEnd: a.warrantyEnd, purchaseCost: a.purchaseCost?.toString() ?? null, vendor: a.vendor,
     flags: [a.flagTransferException && 'Transfer exception', a.flagMissing && 'Missing', a.flagDuplicateSuspect && 'Duplicate-suspect'].filter(Boolean) as string[],
     openTransfer: line ? { id: line.transfer.id, transferNo: line.transfer.transferNo, status: line.status, toLocation: line.transfer.toLocation.namePath } : null,
+    transferStatus: a.transferStatus, transferRequestId: a.transferRequestId,
     updatedAt: a.updatedAt, createdAt: a.createdAt, retiredAt: a.retiredAt, disposalType: a.disposalType, retireReason: a.retireReason,
   };
 }
@@ -467,7 +475,53 @@ export async function listAssets(actor: Actor, f: AssetFilters, p: { skip: numbe
     prisma.asset.findMany({ where, include: assetListInclude, orderBy, skip: p.skip, take: p.take }),
     prisma.asset.count({ where }),
   ]);
-  return { rows: rows.map(shapeAsset), total };
+  const shaped = rows.map(shapeAsset);
+  const [transfers, dups] = await Promise.all([transferDetails(shaped), duplicateDetails(shaped.filter((r) => r.flags.includes('Duplicate-suspect')).map((r) => r.id))]);
+  return { rows: shaped.map((r) => ({ ...r, transfer: transfers.get(r.transferRequestId ?? '') ?? null, duplicates: dups.get(r.id) ?? [] })), total };
+}
+
+export const DUPLICATE_FIELD_LABEL: Record<string, string> = { serial: 'Serial number', legacyTag: 'Legacy tag', hostname: 'Hostname', ip: 'IP address' };
+
+/**
+ * Why an asset is a duplicate suspect: for each open duplicate flag, the field and value that
+ * matched and the existing asset on the other side, with the identifiers a person compares.
+ */
+export async function duplicateDetails(assetIds: string[]) {
+  const out = new Map<string, DuplicateDetail[]>();
+  if (!assetIds.length) return out;
+  const other = { select: { id: true, assetCode: true, make: true, model: true, serialNumber: true, legacyTag: true, hostname: true, ipAddress: true, status: true, category: { select: { name: true } }, location: { select: { namePath: true } } } } as const;
+  const flags = await prisma.duplicateFlag.findMany({
+    where: { clearedAt: null, OR: [{ assetId: { in: assetIds } }, { matchedAssetId: { in: assetIds } }] },
+    include: { asset: other, matchedAsset: other }, orderBy: { createdAt: 'asc' },
+  });
+  type O = (typeof flags)[number]['asset'];
+  const shape = (o: O) => ({ id: o.id, assetCode: o.assetCode, name: `${o.make} ${o.model}`, category: o.category.name, serialNumber: o.serialNumber, legacyTag: o.legacyTag, hostname: o.hostname, ipAddress: o.ipAddress, status: o.status, location: o.location?.namePath ?? null });
+  const add = (id: string, d: DuplicateDetail) => { if (assetIds.includes(id)) out.set(id, [...(out.get(id) ?? []), d]); };
+  for (const f of flags) {
+    const base = { field: f.key, fieldLabel: DUPLICATE_FIELD_LABEL[f.key] ?? f.key, value: f.value, reason: f.reason, flaggedAt: f.createdAt };
+    add(f.assetId, { ...base, other: shape(f.matchedAsset) });
+    add(f.matchedAssetId, { ...base, other: shape(f.asset) });
+  }
+  return out;
+}
+export interface DuplicateDetail {
+  field: string; fieldLabel: string; value: string; reason: string | null; flaggedAt: Date;
+  other: { id: string; assetCode: string; name: string; category: string; serialNumber: string | null; legacyTag: string | null; hostname: string | null; ipAddress: string | null; status: string; location: string | null };
+}
+
+/** The transfer request behind each row's Transfer status: number, destination, and a rejection's reason. */
+export async function transferDetails(rows: { transferRequestId: string | null }[]) {
+  const ids = [...new Set(rows.map((r) => r.transferRequestId).filter((x): x is string => !!x))];
+  const out = new Map<string, { id: string; requestNo: string; toLocation: string | null; rejectedBy: string | null; reason: string | null; decidedAt: Date | null }>();
+  if (!ids.length) return out;
+  const reqs = await prisma.approvalRequest.findMany({ where: { id: { in: ids } }, select: { id: true, requestNo: true, payload: true, decidedAt: true, tasks: { where: { status: 'REJECTED' }, select: { decidedByName: true, comment: true } } } });
+  const toIds = reqs.map((r) => (r.payload as { toLocationId?: string }).toLocationId).filter((x): x is string => !!x);
+  const locs = new Map((await prisma.location.findMany({ where: { id: { in: toIds } }, select: { id: true, namePath: true } })).map((l) => [l.id, l.namePath]));
+  for (const r of reqs) {
+    const rej = r.tasks[0];
+    out.set(r.id, { id: r.id, requestNo: r.requestNo, toLocation: locs.get((r.payload as { toLocationId?: string }).toLocationId ?? '') ?? null, rejectedBy: rej?.decidedByName ?? null, reason: rej?.comment ?? null, decidedAt: r.decidedAt });
+  }
+  return out;
 }
 
 export async function getAssetDetail(actor: Actor, idOrCode: string) {
@@ -479,11 +533,10 @@ export async function getAssetDetail(actor: Actor, idOrCode: string) {
       category: true,
       renewables: { where: { status: { not: 'CANCELLED' } }, orderBy: { expiryDate: 'asc' } },
       assignments: { orderBy: { startAt: 'desc' } },
-      duplicateLinks: { where: { clearedAt: null }, include: { matchedAsset: { select: { id: true, assetCode: true } } } },
-      duplicateOf: { where: { clearedAt: null }, include: { asset: { select: { id: true, assetCode: true } } } },
       deviceData: true,
     },
   });
+  const [transfers, dups] = await Promise.all([transferDetails([full]), duplicateDetails([full.id])]);
   const exceptions = await prisma.transferException.findMany({ where: { assetId: a.id, status: 'OPEN' } });
   const pendingApprovals = await prisma.approvalRequest.findMany({ where: { status: 'PENDING', assetIds: { has: a.id } }, select: { id: true, requestNo: true, action: true, summary: true } });
   const users = await prisma.user.findMany({ where: { id: { in: [full.createdById, full.updatedById, full.retiredById].filter((x): x is string => !!x) } }, select: { id: true, name: true } });
@@ -499,10 +552,8 @@ export async function getAssetDetail(actor: Actor, idOrCode: string) {
     },
     renewables: full.renewables,
     assignments: full.assignments,
-    duplicates: [
-      ...full.duplicateLinks.map((d) => ({ key: d.key, value: d.value, reason: d.reason, other: d.matchedAsset })),
-      ...full.duplicateOf.map((d) => ({ key: d.key, value: d.value, reason: d.reason, other: d.asset })),
-    ],
+    transfer: transfers.get(full.transferRequestId ?? '') ?? null,
+    duplicates: dups.get(full.id) ?? [],
     deviceData: full.deviceData,
     exceptions,
     pendingApprovals,
