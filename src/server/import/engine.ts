@@ -1,6 +1,6 @@
 import type { ImportJob, ImportType, Prisma } from '@prisma/client';
 import { stringify } from 'csv-stringify/sync';
-import { prisma, tx } from '@/lib/db';
+import { prisma, tx, type Db } from '@/lib/db';
 import { AppError, badRequest, conflict, forbidden, notFound } from '@/lib/errors';
 import type { Actor } from '../actor';
 import { audit } from '../audit';
@@ -9,7 +9,7 @@ import { actorForUser } from '../services/approvals';
 import { deleteObject, getObject, newKey, putObject } from '../storage';
 import { getSettings } from '../settings';
 import { enqueue } from '../jobs/queue';
-import { parseTabular } from './parse';
+import { parseTabular, type ParsedRow } from './parse';
 import { aliasMap, COLUMNS } from './templates';
 import { applyAssets, validateAssets } from './assets';
 import { applyBranchUsers, applyEmployees, validateBranchUsers, validateEmployees } from './employees';
@@ -33,14 +33,26 @@ export async function startImport(actor: Actor, p: { type: ImportType; mode: 'CR
   return job;
 }
 
-async function validate(job: ImportJob, onProgress?: (n: number) => Promise<void>): Promise<ValidationResult<unknown>> {
-  const buf = await getObject(job.storageKey);
-  const { rows } = await parseTabular(job.fileName, buf, aliasMap(COLUMNS[job.type]));
-  await prisma.importJob.update({ where: { id: job.id }, data: { totalRows: rows.length } });
+/**
+ * The rows to check. The first dry run reads the uploaded file; after that the stored rows are the
+ * source, because they carry the corrections made in the preview, and those are what get imported.
+ */
+async function sourceRows(db: Db, job: ImportJob): Promise<ParsedRow[]> {
+  if (job.validatedAt) {
+    const stored = await db.importRow.findMany({ where: { jobId: job.id }, orderBy: { rowNumber: 'asc' }, select: { rowNumber: true, data: true } });
+    if (stored.length) return stored.map((r) => ({ rowNumber: r.rowNumber, data: r.data as Record<string, string> }));
+  }
+  const { rows } = await parseTabular(job.fileName, await getObject(job.storageKey), aliasMap(COLUMNS[job.type]));
+  await db.importJob.update({ where: { id: job.id }, data: { totalRows: rows.length } });
+  return rows;
+}
+
+async function validate(job: ImportJob, onProgress?: (n: number) => Promise<void>, db: Db = prisma): Promise<ValidationResult<unknown>> {
+  const rows = await sourceRows(db, job);
   const ctx = { mode: job.mode, createMissing: job.createMissing };
-  if (job.type === 'ASSETS') return validateAssets(prisma, ctx, rows, onProgress);
-  if (job.type === 'EMPLOYEES') return validateEmployees(prisma, ctx, rows);
-  return validateBranchUsers(prisma, ctx, rows);
+  if (job.type === 'ASSETS') return validateAssets(db, ctx, rows, onProgress);
+  if (job.type === 'EMPLOYEES') return validateEmployees(db, ctx, rows);
+  return validateBranchUsers(db, ctx, rows);
 }
 
 function countOutcomes(rows: RowResult<unknown>[]) {
@@ -63,7 +75,7 @@ export async function runValidation(jobId: string) {
     const counts = countOutcomes(v.rows);
     await prisma.importJob.update({ where: { id: jobId }, data: { status: 'VALIDATED', processedRows: v.rows.length, totalRows: v.rows.length, counts, locationsToCreate: v.locationsToCreate, departmentsToCreate: v.departmentsToCreate, validatedAt: new Date() } });
     await audit(prisma, await actorForUser(prisma, job.createdById), { action: 'IMPORT_DRY_RUN', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: counts });
-    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Dry run finished: ${job.fileName}`, body: `${counts.CREATED} to create, ${counts.UPDATED} to update, ${counts.UNCHANGED} unchanged, ${counts.WARNING} warnings, ${counts.REJECTED} rejected. Review and confirm to commit.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:validated` });
+    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Dry run finished: ${job.fileName}`, body: `${counts.CREATED} to create, ${counts.UPDATED} to update, ${counts.UNCHANGED} duplicate, ${counts.WARNING} warnings, ${counts.REJECTED} rejected. Review, fix any rows and confirm to import.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:validated` });
   } catch (e) {
     const msg = e instanceof AppError ? e.message : `Validation failed: ${(e as Error).message}`;
     await prisma.importJob.update({ where: { id: jobId }, data: { status: 'FAILED', error: msg } });
@@ -76,7 +88,7 @@ export async function confirmImport(actor: Actor, jobId: string, warningReason?:
   if (!job) throw notFound('Import');
   if (job.status !== 'VALIDATED') throw conflict(`This import is ${job.status.toLowerCase().replace('_', ' ')}; only a validated dry run can be committed.`);
   const counts = job.counts as Record<string, number>;
-  if ((counts.CREATED ?? 0) + (counts.UPDATED ?? 0) + (counts.WARNING ?? 0) === 0) throw badRequest('Nothing to commit: every row is unchanged or rejected.');
+  if ((counts.CREATED ?? 0) + (counts.UPDATED ?? 0) + (counts.WARNING ?? 0) === 0) throw badRequest('Nothing to import: every row is a duplicate or rejected.');
   if ((counts.WARNING ?? 0) > 0 && !warningReason?.trim()) throw badRequest(`${counts.WARNING} row(s) carry duplicate warnings. Give a reason to accept them.`, [{ field: 'warningReason', message: 'Required' }]);
   const n = await prisma.importJob.updateMany({ where: { id: jobId, status: 'VALIDATED' }, data: { status: 'COMMIT_QUEUED', warningReason: warningReason ?? null, committedById: actor.id, processedRows: 0 } });
   if (!n.count) throw conflict('This import has already been confirmed.');
@@ -92,6 +104,69 @@ export async function cancelImport(actor: Actor, jobId: string) {
   await prisma.importJob.update({ where: { id: jobId }, data: { status: 'CANCELLED' } });
   await audit(prisma, actor, { action: 'IMPORT_CANCELLED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName });
   return { ok: true };
+}
+
+/** Preview cells that can be corrected before confirming. Asset ID is never one: it is assigned on import. */
+export const EDITABLE_ASSET_FIELDS = ['serialnumber', 'make', 'model', 'category', 'legacytag', 'ipaddress', 'hostname', 'macaddress', 'location', 'holderemployeeid', 'purchasedate', 'purchasecost', 'vendor', 'warrantyend', 'condition', 'remarks'] as const;
+
+/**
+ * Re-checks every row of a dry run waiting for confirmation, using the stored (possibly corrected)
+ * values, and stores the new results and counts. Every row is checked again because a change on one
+ * row can clear or create a repeat on another.
+ */
+async function recheck(t: Db, job: ImportJob) {
+  const v = await validate(job, undefined, t);
+  const stored = new Map((await t.importRow.findMany({ where: { jobId: job.id }, select: { rowNumber: true, outcome: true, messages: true, matchedId: true } })).map((r) => [r.rowNumber, r]));
+  for (const r of v.rows) {
+    const s = stored.get(r.rowNumber);
+    if (s && s.outcome === r.outcome && s.matchedId === (r.matchedId ?? null) && s.messages.join('\n') === r.messages.join('\n')) continue;
+    await t.importRow.update({ where: { jobId_rowNumber: { jobId: job.id, rowNumber: r.rowNumber } }, data: { outcome: r.outcome, messages: r.messages, matchedId: r.matchedId ?? null } });
+  }
+  const counts = countOutcomes(v.rows);
+  await t.importJob.update({ where: { id: job.id }, data: { counts, locationsToCreate: v.locationsToCreate, departmentsToCreate: v.departmentsToCreate } });
+  return counts;
+}
+
+/** Locks a dry run waiting for confirmation, so an edit and a confirm cannot interleave. */
+async function lockForEdit(t: Db, actor: Actor, jobId: string) {
+  if (actor.role === 'BRANCH_USER') throw forbidden();
+  await t.$queryRaw`SELECT id FROM import_jobs WHERE id = ${jobId} FOR UPDATE`;
+  const job = await t.importJob.findUnique({ where: { id: jobId } });
+  if (!job) throw notFound('Import');
+  if (job.status !== 'VALIDATED') throw conflict('This import is no longer waiting for confirmation, so its rows cannot be changed.');
+  return job;
+}
+
+/**
+ * Corrects one row of an asset dry run before it is confirmed (a missing serial, a wrong category,
+ * an unknown location…), then checks the whole file again. Nothing is imported until "Confirm".
+ */
+export async function editImportRow(actor: Actor, jobId: string, rowNumber: number, changes: Record<string, string>) {
+  return tx(async (t) => {
+    const job = await lockForEdit(t, actor, jobId);
+    if (job.type !== 'ASSETS') throw badRequest('Only asset imports can be corrected in the preview.');
+    const row = await t.importRow.findUnique({ where: { jobId_rowNumber: { jobId, rowNumber } } });
+    if (!row) throw notFound('Import row');
+    const data = { ...(row.data as Record<string, string>) };
+    const before: Record<string, string> = {}, after: Record<string, string> = {};
+    for (const [k, raw] of Object.entries(changes)) {
+      if (!(EDITABLE_ASSET_FIELDS as readonly string[]).includes(k)) throw badRequest(`"${k}" cannot be changed in the preview.`);
+      const v = raw.trim();
+      if ((data[k] ?? '') === v) continue;
+      before[k] = data[k] ?? ''; after[k] = v;
+      data[k] = v;
+    }
+    if (!Object.keys(after).length) return { counts: job.counts, changed: false };
+    await t.importRow.update({ where: { id: row.id }, data: { data } });
+    const counts = await recheck(t, job);
+    await audit(t, actor, { action: 'IMPORT_ROW_EDITED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, before, after, details: { row: rowNumber } });
+    return { counts, changed: true };
+  }, { timeoutMs: 5 * 60_000 });
+}
+
+/** "Check again": re-runs the checks on the stored rows, e.g. after someone registered one of the serials meanwhile. */
+export async function revalidateImport(actor: Actor, jobId: string) {
+  return tx(async (t) => ({ counts: await recheck(t, await lockForEdit(t, actor, jobId)) }), { timeoutMs: 5 * 60_000 });
 }
 
 /** Worker step 2: re-validate against the current database, then apply atomically. */
@@ -124,7 +199,7 @@ export async function runCommit(jobId: string) {
     await prisma.importJob.update({ where: { id: jobId }, data: { status: 'COMMITTED', committedAt: new Date(), processedRows: v.rows.length, counts } });
     if (afterCommit) await (afterCommit as () => Promise<void>)();
     await audit(prisma, actor, { action: 'IMPORT_COMMITTED', entityType: 'Import', entityId: jobId, entityLabel: job.fileName, details: { type: job.type, mode: job.mode, ...counts, locationsCreated: job.locationsToCreate } });
-    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Import committed: ${job.fileName}`, body: `${counts.CREATED} created, ${counts.UPDATED} updated, ${counts.WARNING} with warnings, ${counts.UNCHANGED} unchanged, ${counts.REJECTED} rejected.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:committed` });
+    await notifyUsers(prisma, [job.createdById], { type: 'IMPORT_COMPLETED', title: `Import committed: ${job.fileName}`, body: `${counts.CREATED} created, ${counts.UPDATED} updated, ${counts.WARNING} with warnings, ${counts.UNCHANGED} duplicate, ${counts.REJECTED} rejected.`, link: `/imports/${jobId}`, eventKey: `import:${jobId}:committed` });
   } catch (e) {
     const msg = e instanceof AppError ? e.message : `Commit failed and was rolled back: ${(e as Error).message}`;
     console.error('[import] commit failed', e);
@@ -184,7 +259,7 @@ export async function importReportCsv(actor: Actor, id: string) {
   const rows = await prisma.importRow.findMany({ where: { jobId: id }, orderBy: { rowNumber: 'asc' } });
   const cols = COLUMNS[job.type].map((c) => c.key);
   const header = ['Row', 'Outcome', 'Reason', 'Result ID', ...COLUMNS[job.type].map((c) => c.header)];
-  const outcomeLabel = (o: string) => o[0] + o.slice(1).toLowerCase();
+  const outcomeLabel = (o: string) => (o === 'UNCHANGED' ? 'Duplicate' : o[0] + o.slice(1).toLowerCase());
   const lines = rows.map((r) => [r.rowNumber, outcomeLabel(r.outcome), r.messages.join(' | '), r.resultCode ?? '', ...cols.map((k) => (r.data as Record<string, string>)[k] ?? '')]);
   await audit(prisma, actor, { action: 'EXPORT', entityType: 'Import', entityId: id, entityLabel: `${job.fileName} result report`, details: { rows: rows.length, format: 'csv' } });
   return { data: Buffer.from('﻿' + stringify([header, ...lines])), name: `${job.fileName.replace(/\.[^.]+$/, '')}-result.csv` };

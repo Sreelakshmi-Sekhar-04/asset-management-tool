@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { POST as devicesHook } from '@/app/api/integrations/[source]/devices/route';
 import { issueApiKey, revokeApiKey, saveSource, resolveConflict } from '@/server/services/integrations';
 import { updateAsset } from '@/server/services/assets';
-import { confirmImport, importReportCsv, importRows, purgeExpiredImportReports, runCommit, runValidation, startImport } from '@/server/import/engine';
+import { confirmImport, editImportRow, importReportCsv, importRows, purgeExpiredImportReports, revalidateImport, runCommit, runValidation, startImport } from '@/server/import/engine';
 import { world, type World } from './fixtures';
 import { call, rejectsWith } from './helpers';
 
@@ -103,6 +103,50 @@ describe('imports', () => {
     expect(rows[0].outcome).toBe('REJECTED');
     expect(rows[0].messages.join(' ')).toMatch(/Unknown location.*Duplicate: serial TAKEN-.* already exists on /);
     expect((rows[0] as { view?: { asset: { id: string } | null } }).view?.asset?.id).toBe(taken.id);
+  });
+
+  it('rows corrected in the preview are checked again and imported with the corrected values', async () => {
+      const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'fix.csv', data: csv([
+      `${w.cat.name},Dell,Latitude,,${loc()}`,
+      `${w.cat.name},HP,EliteBook,FIX2-${w.s},${loc()}`,
+      `Nope,Lenovo,ThinkPad,FIX3-${w.s},${loc()}`,
+      ]) });
+      await runValidation(job.id);
+      let { rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 });
+      expect(rows.map((r) => r.outcome)).toEqual(['REJECTED', 'CREATED', 'REJECTED']);
+      expect(rows[0].messages.join(' ')).toMatch(/Serial number is required/);
+
+      // A serial that repeats another row is caught on the edited row.
+      await editImportRow(w.it.actor, job.id, 2, { serialnumber: `FIX2-${w.s}` });
+      ({ rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 }));
+      expect(rows[1].outcome).toBe('REJECTED');
+      expect(rows[1].messages.join(' ')).toMatch(/duplicated within the file \(rows 2 and 3\)/);
+
+      await editImportRow(w.it.actor, job.id, 2, { serialnumber: ` SN-FIXED-${w.s} ` });
+      await editImportRow(w.it.actor, job.id, 4, { category: w.cat.name, legacytag: `LT-${w.s}`, ipaddress: '10.99.1.7' });
+      ({ rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 }));
+      expect(rows.map((r) => r.outcome)).toEqual(['CREATED', 'CREATED', 'CREATED']);
+      expect((await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } })).counts).toMatchObject({ CREATED: 3, REJECTED: 0 });
+      await expect(revalidateImport(w.it.actor, job.id)).resolves.toMatchObject({ counts: { CREATED: 3 } });
+
+      await rejectsWith(editImportRow(w.it.actor, job.id, 2, { assetcode: 'X' }), 400);
+      await rejectsWith(editImportRow(w.brA.actor, job.id, 2, { serialnumber: 'X' }), 403);
+
+      await confirmImport(w.it.actor, job.id);
+      await rejectsWith(editImportRow(w.it.actor, job.id, 2, { serialnumber: 'LATE' }), 409);
+      await runCommit(job.id);
+      expect((await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } })).status).toBe('COMMITTED');
+      expect(await prisma.asset.findFirst({ where: { serialNormalized: `sn-fixed-${w.s}`.toLowerCase() } })).toMatchObject({ make: 'Dell', serialNumber: `SN-FIXED-${w.s}` });
+      expect(await prisma.asset.findFirst({ where: { serialNormalized: `fix3-${w.s}`.toLowerCase() } })).toMatchObject({ categoryId: w.cat.id, legacyTag: `LT-${w.s}`, ipAddress: '10.99.1.7' });
+  });
+
+  it('a row already in the register is reported as a duplicate and skipped', async () => {
+    const job = await startImport(w.it.actor, { type: 'ASSETS', mode: 'CREATE_ONLY', createMissing: false, fileName: 'dup.csv', data: csv([`${w.cat.name},Dell,Latitude,IMP1-${w.s},${loc()}`]) });
+    await runValidation(job.id);
+    const { rows } = await importRows(w.it.actor, job.id, { skip: 0, take: 10 });
+    expect(rows[0].outcome).toBe('UNCHANGED');
+    expect(rows[0].messages[0]).toMatch(/^Duplicate of /);
+    expect((await importReportCsv(w.it.actor, job.id)).data.toString()).toMatch(/,Duplicate,/);
   });
 
   it('row reports are purged after the retention period, but the import log entry stays', async () => {
